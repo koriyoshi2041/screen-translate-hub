@@ -16,8 +16,8 @@ screen-translate-hub 是一个自部署的屏幕翻译与 AI 平台。Windows �
 | [产品需求](docs/requirements/01-product.md) | 产品定位、部署形态、客户端、功能入口、展示方式、AI 交互、多语言、历史记录、硬件要求 |
 | [工作流](docs/requirements/02-workflow.md) | 工作流与入口的绑定、默认模板、节点编辑规则、执行位置、跨设备数据流向 |
 | [OCR 与竞速翻译](docs/requirements/03-ocr-and-translation-race.md) | OCR 引擎选择、识别结果归一化、多翻译源竞速的显示与替换规则 |
-| [运行与生命周期](docs/requirements/04-run-lifecycle.md) | 运行、批次、竞速和请求的生命周期，持续屏幕的处理节奏，超时、重试、停止、断连与配置变更 |
-| [账号、设备与共享](docs/requirements/05-accounts-devices-sharing.md) | 主人账号、登录方式、Windows 服务开放、屏幕共享与观看规则 |
+| [运行与生命周期](docs/requirements/04-run-lifecycle.md) | 运行、批次、竞速和请求的生命周期，持续屏幕的处理节奏、段落复用与译文缓存，超时、重试、暂停、停止、断连与配置变更 |
+| [账号、设备与共享](docs/requirements/05-accounts-devices-sharing.md) | 主人账号、登录方式、Windows 服务开放、屏幕共享、来源与观看规则 |
 | [待定事项](docs/requirements/open-questions.md) | 已识别但尚未确定的问题 |
 
 ## 开发原则

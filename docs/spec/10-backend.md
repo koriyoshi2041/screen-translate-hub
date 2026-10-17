@@ -28,7 +28,7 @@
 
 每个数据库用 SQLite 的 `user_version` 记录结构版本。服务启动时，在开始接受连接之前：
 
-1. 读取 `user_version`，与本版本程序要求的结构版本比较；
+1. 读取 `user_version`，与本版本程序要求的结构版本比较。高于要求时，说明数据库来自更新的版本，例如升级失败、程序换回旧版本之后，服务以错误退出，不读写数据库，并在日志中写明两个版本号；恢复由 `sth-admin` 负责（[部署与运维](14-deployment.md) 6.1）；
 2. 需要升级时，先用 `VACUUM INTO` 把数据库完整复制一份到 `backups/` 目录，文件名包含服务名、时刻和原结构版本；
 3. 在一个事务中依次执行各步升级，最后更新 `user_version`；
 4. 任何一步失败，事务回滚，数据库保持升级前的样子，服务以错误退出，并在日志中写明失败的步骤。
@@ -52,7 +52,7 @@ SQLite 的建表和改表语句都在事务之内，第 4 步的回滚因此是�
 - 握手时，设备签名和浏览器会话交给账号与认证验证（`VerifyDevice`、`VerifySession`）；后台服务的凭据由中转自己核对，它在启动时从编排文件的机密配置读取各服务凭据的哈希；
 - 同一台电脑同时只保留一条连接。新连接通过认证后，旧连接收到 `GoAway` 并被关闭；
 - 电脑上线和离线时，中转通知服务注册，服务注册再通过 `Watch` 通知运行协调器（[运行协调器](04-run-coordinator.md) 6.3）；
-- 主人撤销某台电脑时，账号与认证通知中转，中转立即关闭它的连接（[安全](11-security.md) 3.4）；
+- 中转订阅 `auth.WatchRevocations`（[服务接口](09-service-interfaces.md) 第 18 节）：收到被撤销的电脑，立即关闭它的连接；收到失效的会话，立即关闭这个会话的全部浏览器连接。浏览器连接在连接表中记有会话标识，中转据此找到要关闭的连接（[安全](11-security.md) 2.6、3.4）；
 - 每条连接同时打开的流不超过 128 条，超过时新的 `Open` 以 `rate_limited` 关闭，附带 1 秒的重试等待时间，说明为"连接上的流已满"。流已满只是暂时的状态，运行协调器按限流处理，等待时间过后即恢复（[运行协调器](04-run-coordinator.md) 6.3）。
 
 中转不解码业务消息，它的内存占用由流的数量和额度决定：最坏情况下每条连接 128 MiB（[服务协议](08-service-protocol.md) 第 5 节）。
@@ -85,6 +85,7 @@ CREATE TABLE sessions (
   last_seen_at  TEXT NOT NULL,
   user_agent    TEXT,
   address       TEXT,
+  known_browser_id TEXT,                                 -- 签发这个会话的浏览器，见 known_browsers
   revoked_at    TEXT
 );
 
@@ -119,17 +120,19 @@ CREATE TABLE known_browsers (
   id            TEXT PRIMARY KEY,                        -- 登录成功时写入浏览器的标识
   token_hash    BLOB NOT NULL UNIQUE,
   created_at    TEXT NOT NULL,
-  last_login_at TEXT NOT NULL
+  last_login_at TEXT NOT NULL,
+  revoked_at    TEXT                                     -- 作废后，带这个标记的登录按陌生浏览器计数
 );
 ```
 
 ### 3.2 行为
 
 - 首次启动时没有主人账号。部署说明要求部署者用命令行创建主人账号，网页端在此之前只显示"请先在服务器上创建账号"的说明。这样做，公网上的第一个访问者就无法抢先注册成为主人；
-- 登录按 [安全](11-security.md) 2.1 至 2.3 校验密码和二步验证，按 2.2 的规则限速；登录成功时，为这个浏览器写入一行 `known_browsers`，并设置对应的 Cookie；
+- 登录按 [安全](11-security.md) 2.1 至 2.3 校验密码和二步验证，按 2.2 的规则限速；登录成功时，为这个浏览器写入一行 `known_browsers`，并设置对应的 Cookie，新会话的 `known_browser_id` 记下这一行；
 - 配对码按 [安全](11-security.md) 3.1 生成和校验。猜错一次，`pairing_failures` 加一；累计达到 5 次时，把全部有效的配对码标为作废，计数清零，主人需要重新生成。配对成功时写入 `devices`，把这个配对码标为已用；
-- 会话的空闲超时和绝对有效期到期后，`VerifySession` 不再通过；过期和已撤销的会话行每天清理一次；
-- 命令行重置密码或二步验证时（需求 05 第 2 节），在同一个事务中更新 `owner`、删除全部 `recovery_codes`、把全部会话标为已撤销。
+- 会话的空闲超时和绝对有效期到期后，`VerifySession` 不再通过，账号与认证同时经 `WatchRevocations` 推送这个会话，中转关闭它的连接；过期和已撤销的会话行每天清理一次；
+- 注销会话时，在同一个事务中把会话标为已撤销，并作废它的 `known_browser_id` 指向的已知浏览器标记。修改密码时，除当前会话外的全部会话标为已撤销，除当前浏览器外的全部已知浏览器标记作废。两种情况都经 `WatchRevocations` 推送（需求 05 第 5 节）；
+- 命令行重置分两条命令（需求 05 第 2 节，[部署与运维](14-deployment.md) 第 3 节）。重置密码时，只更新 `owner` 的密码，二步验证和恢复码保持不变：忘记密码与验证器无关，删掉恢复码反而让主人之后丢失验证器时无码可用。重置二步验证时，清空 `totp_secret` 和 `totp_last_step`，删除全部 `recovery_codes`。两条命令都在同一个事务中把全部会话标为已撤销、作废全部已知浏览器标记，并推送撤销。
 
 ## 4 服务注册
 
@@ -139,16 +142,21 @@ CREATE TABLE known_browsers (
 
 ```sql
 CREATE TABLE usage (
-  device    TEXT NOT NULL,
-  service   TEXT NOT NULL,
-  period    TEXT NOT NULL,                               -- 计费周期，例如 2026-10
-  calls     INTEGER NOT NULL,
-  units     INTEGER NOT NULL,                            -- 按服务的计量方式：字符或词元
-  PRIMARY KEY (device, service, period)
+  device       TEXT NOT NULL,
+  service      TEXT NOT NULL,
+  target_host  TEXT NOT NULL DEFAULT '',                 -- 自定义 HTTP 请求按目标主机分别计量，其他服务为空
+  period       TEXT NOT NULL,                            -- 计费周期，协调世界时的自然月，例如 2026-10
+  calls        INTEGER NOT NULL,
+  units        INTEGER NOT NULL,                         -- 按服务的计量方式：调用次数、字符或词元
+  PRIMARY KEY (device, service, target_host, period)
 );
 ```
 
-费用上限本身由执行计量的 AI 适配服务保存和执行，服务注册只转发"上限已变化"的通知（[服务接口](09-service-interfaces.md) 第 14、17 节）。
+执行计量的服务每次调用结束后经 `ReportUsage` 报告用量，服务注册累加到这张表；网页端和重启后的计量服务经 `GetUsage` 读取（[服务接口](09-service-interfaces.md) 第 14、17 节）。
+
+费用上限保存在工作流与配置存储（第 7 节），执行计量的服务经 `config.WatchServiceSettings` 订阅后自己执行。服务注册同样订阅这些设置，在上限变化时经 `Watch` 发出"费用上限变化"，运行协调器据此恢复因 `quota_exceeded` 不可用的服务。
+
+服务注册还订阅 `auth.WatchRevocations`：某台电脑被撤销时，删除它登记的全部服务，经 `Watch` 发出"设备已撤销"（[服务接口](09-service-interfaces.md) 第 17、18 节）。
 
 ## 5 观看分发
 
@@ -170,7 +178,7 @@ CREATE TABLE usage (
 
 ### 5.2 屏幕共享开关
 
-主程序通过 `SetSharing` 报告电脑的共享开关。开关关闭时，观看分发立即：
+主程序通过 `SetSharing` 报告电脑的共享开关。开关关闭时，以及经 `auth.WatchRevocations` 得知这台电脑被撤销时，观看分发立即：
 
 1. 把这台电脑的全部来源从来源列表中删除；
 2. 向这些来源的订阅者发送运行已下线的状态，并结束订阅流；
@@ -184,7 +192,7 @@ CREATE TABLE usage (
 
 ### 5.4 网页对话面板
 
-`PublishDialog` 收到的 AI 回答，转发给当前所有 `SubscribeDialogs` 订阅者。观看分发不保存对话内容：对话的历史由发起运行的电脑在运行结束时保存到历史记录（[运行协调器](04-run-coordinator.md) 11.4），网页端需要时从历史记录中读取。
+`PublishDialog` 收到的 `DialogMessage`，转发给当前所有 `SubscribeDialogs` 订阅者；消息带有运行、节点和轮次，网页端据此把回答归到各自的对话中（[服务接口](09-service-interfaces.md) 第 19 节）。观看分发不保存对话内容：对话的历史由发起运行的电脑在运行结束时保存到历史记录（[运行协调器](04-run-coordinator.md) 11.4），网页端需要时从历史记录中读取。
 
 ## 6 网页前端
 
@@ -216,13 +224,31 @@ CREATE TABLE settings (
   value       TEXT NOT NULL,                             -- JSON
   updated_at  TEXT NOT NULL
 );
+
+CREATE TABLE service_settings (
+  service     TEXT PRIMARY KEY,                          -- 后台服务的登记名称
+  settings    TEXT NOT NULL,                             -- ServiceSettings 的 JSON：调低的上限、费用上限、代理
+  updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE external_services (
+  name        TEXT PRIMARY KEY,
+  kind        TEXT NOT NULL,                             -- ai 或 credential
+  config      TEXT NOT NULL,                             -- AI 服务的地址、模型、能力、计量方式，JSON，不含凭据
+  secret      BLOB,                                      -- 凭据的内容
+  updated_at  TEXT NOT NULL
+);
 ```
 
 ### 7.2 行为
 
 保存工作流时，在同一个事务中：读出当前的修订号，与提交的修订号比较；相等则写入新内容，修订号加一；不相等则不写入，回复冲突（[工作流定义](03-workflow.md) 第 1 节）。SQLite 同一时刻只允许一个写事务，读出和写入在同一个事务里，两个编辑器同时保存时，后提交的一方一定看到前一方写入后的修订号。
 
-平台设置包括后台历史记录的容量上限、出站代理（需求 01 第 2.5 节）、会话的空闲超时和绝对有效期。
+平台设置包括后台历史记录的容量上限、全局出站代理（需求 01 第 2.5 节）、会话的空闲超时和绝对有效期。
+
+`service_settings` 只保存后台服务的设置，电脑上的服务的设置保存在那台电脑上（[服务接口](09-service-interfaces.md) 第 20 节）。设置变化时，订阅了 `WatchServiceSettings` 的服务注册和相应的后台服务立即收到。
+
+`external_services` 保存网页端配置的后台 AI 服务和命名凭据（需求 01 第 6 节）。凭据的内容只经 `WatchExternalServices` 交给 AI 适配服务和自定义 HTTP 请求服务，`ListExternalServices` 和网页端都不返回它（[安全](11-security.md) 7.2）。这两个服务没有自己的持久数据，每次启动时从这里读取配置，再订阅变化。
 
 ## 8 历史记录存储
 
@@ -230,8 +256,8 @@ CREATE TABLE settings (
 
 ```sql
 CREATE TABLE entries (
-  id          TEXT PRIMARY KEY,                          -- 主程序生成的 UUID 第 7 版
-  kind        TEXT NOT NULL,                             -- screenshot、selection、conversation
+  id          TEXT PRIMARY KEY,                          -- UUID 第 7 版，由主程序或网页端生成
+  kind        TEXT NOT NULL,                             -- screenshot、selection、conversation、node_output
   created_at  TEXT NOT NULL,
   device_id   TEXT NOT NULL,
   run_id      TEXT,
@@ -248,11 +274,12 @@ CREATE TABLE blobs (
   PRIMARY KEY (entry_id, name)
 );
 
-CREATE TABLE pending_deletions (
+CREATE TABLE pending_changes (
   entry_id    TEXT NOT NULL,
   device_id   TEXT NOT NULL,                             -- 需要通知的电脑
-  deleted_at  TEXT NOT NULL,
-  PRIMARY KEY (entry_id, device_id)
+  change      TEXT NOT NULL,                             -- deleted、pinned 或 unpinned
+  changed_at  TEXT NOT NULL,
+  PRIMARY KEY (entry_id, device_id)                      -- 同一条目只保留最后一次变化
 );
 ```
 
@@ -263,16 +290,24 @@ CREATE TABLE pending_deletions (
 `Upload` 写入一个条目的步骤：
 
 1. 先把文件写到临时文件名，全部写完后再改名为正式文件名；
-2. 在一个事务中写入 `entries` 和 `blobs`；条目标识已经存在时，跳过这个条目，上传因此可以安全地重复进行；
-3. 执行容量检查：总大小超过上限时，按标识从小到大（即从旧到新）删除未标记保留的条目，直到总大小不超过上限（需求 01 第 8 节）。
+2. 在一个事务中写入 `entries` 和 `blobs`。条目标识已经存在时：设备标识为后台的对话条目，即网页端上传的对话，用新内容覆盖原来的条目，网页端每轮回答完成后用同一个标识上传一次；其他条目跳过。上传因此可以安全地重复进行；
+3. 执行容量检查：总大小超过上限时，按标识从小到大（即从旧到新）删除未标记保留的条目，直到总大小不超过上限（需求 01 第 8 节）。容量清理只删除后台的副本，不写通知：两端的容量上限各自设置。
 
 只剩标记为保留的条目、总大小仍超过上限时，不再删除，网页端提示用户取消一些保留标记或调高上限。
 
 第 1 步先写文件、第 2 步再写数据库，崩溃时最多留下没有数据库记录的孤立文件，不会出现数据库指向不存在的文件。服务每天扫描一次，删除超过一天的孤立文件。
 
-### 8.3 删除的同步
+在线备份恢复之后是例外：数据库备份完成后、文件复制到达之前被删除的条目，备份中还有记录，文件却不在了（[部署与运维](14-deployment.md) 第 7 节）。所以服务每次启动时，删除文件缺失的条目，在日志中记下数量。这些条目在备份进行时已经被用户或清理删除，删掉它们与用户的操作一致。
 
-在网页端删除一条记录时，在同一个事务中删除 `entries` 的行；记录来自某台电脑时，再为这台电脑写入一行 `pending_deletions`。事务提交后删除文件。后台产生的记录，即网页对话面板中直接发起的对话，没有本机副本，不写通知。产生它的电脑在线时，经 `WatchDeletions` 立即收到通知；不在线时，下次连接时收到。电脑确认删除了本机副本后，对应的 `pending_deletions` 行被删除。
+### 8.3 删除与保留标记的同步
+
+用户在网页端删除一条记录，或者按时间、种类手动清理时，在同一个事务中删除 `entries` 的行；手动清理跳过标记为保留的记录。被删除的记录来自某台电脑时，再为这台电脑写入一行 `pending_changes`，变化为 `deleted`。事务提交后删除文件。
+
+用户在网页端标记或取消保留时，同样为来源电脑写入一行 `pending_changes`，变化为 `pinned` 或 `unpinned`。
+
+后台产生的记录，即网页对话面板中直接发起的对话，没有本机副本，不写通知。来源电脑在线时，经 `WatchChanges` 立即收到通知；不在线时，下次连接时收到。电脑确认处理了本机副本后，对应的 `pending_changes` 行被删除。
+
+反方向的同步由主程序发起：用户在桌面端删除、手动清理或改变保留标记时，主程序对已经上传的记录调用 `Delete`、`SetPinned`，后台照常处理，但不再给发起的电脑写通知（需求 01 第 8 节，[服务接口](09-service-interfaces.md) 第 21 节）。
 
 ## 9 日志
 

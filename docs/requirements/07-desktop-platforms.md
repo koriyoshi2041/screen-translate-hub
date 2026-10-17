@@ -30,7 +30,7 @@ macOS 版只支持 Apple 芯片，依据有三条：
 - onnxruntime 1.31.0 和 PyTorch 2.14.1 的官方 macOS 安装包只有 Apple 芯片版本，PyTorch 从 2.3 起不再发布 Intel Mac 版本；
 - 本机模型工具在 Intel Mac 上的加速受限，例如 Ollama 在 Intel Mac 上只能用 CPU 运行。
 
-最低版本定为 macOS 15，需要测试的系统版本更少；系统自带的设备端翻译接口 TranslationSession 也从 macOS 15 开始提供，可以作为 macOS 上的本机翻译服务。
+最低版本定为 macOS 15，需要测试的系统版本更少。系统自带的设备端翻译接口 TranslationSession 也从 macOS 15 开始提供，但在 macOS 15 上只能经 SwiftUI 界面取得翻译会话，首版不把它作为翻译服务，留到后续版本。
 
 ## 2 需求与系统能力对照
 
@@ -39,25 +39,26 @@ macOS 版只支持 Apple 芯片，依据有三条：
 | 需求 | Windows | macOS |
 | --- | --- | --- |
 | 屏幕采集 | Windows.Graphics.Capture；桌面程序可以直接按显示器或窗口建立采集，不经系统选择器 | ScreenCaptureKit，macOS 12.3 起 |
-| 采集排除平台自己的覆盖层、浮卡和提示 | 窗口通过 `SetWindowDisplayAffinity` 设为 `WDA_EXCLUDEFROMCAPTURE` | 采集时用 `SCContentFilter` 按应用排除本应用，之后新建的窗口也自动排除 |
+| 采集排除平台自己的全部窗口 | 每个窗口通过 `SetWindowDisplayAffinity` 设为 `WDA_EXCLUDEFROMCAPTURE` | 采集时用 `SCContentFilter` 按应用排除本应用，之后新建的窗口也自动排除 |
 | 采集不含鼠标指针 | Windows.Graphics.Capture 的 `IsCursorCaptureEnabled` | `SCStreamConfiguration.showsCursor` 设为 false |
 | 覆盖层让鼠标和键盘穿透 | 分层窗口（`WS_EX_LAYERED`）加 `WS_EX_TRANSPARENT`，鼠标事件全部交给下方窗口；加 `WS_EX_NOACTIVATE` 后不会成为前台窗口，键盘输入留在用户正在操作的窗口 | 覆盖层窗口设置 `ignoresMouseEvents`；无边框窗口不会成为接收键盘输入的窗口 |
 | 浮卡和鼠标旁提示不抢焦点 | `WS_EX_NOACTIVATE`；浮卡要响应拖动时，在 `WM_MOUSEACTIVATE` 中返回 `MA_NOACTIVATE`，照常收到鼠标消息但不被激活；`WS_EX_TOOLWINDOW` 让它们不出现在任务栏和 Alt+Tab 中 | 使用不激活应用的面板（`nonactivatingPanel`） |
 | 覆盖层盖在其他应用的全屏画面上 | 置顶窗口（`WS_EX_TOPMOST`），真正的独占全屏游戏除外，见 2.2 | 需要菜单栏应用形态，见第 3 节 |
 | 覆盖层跟随目标窗口移动 | `SetWinEventHook` 订阅窗口位置变化事件（`EVENT_OBJECT_LOCATIONCHANGE` 等），进程外回调，不需要权限 | 读取窗口坐标（`CGWindowListCopyWindowInfo`），不需要权限 |
-| 被其他窗口挡住的部分不显示译文 | `SetWindowPos` 把覆盖层排在目标窗口正上方，见 2.1 | 覆盖层留在上层，按挡在目标窗口前面的窗口（`optionOnScreenAboveWindow`）裁掉被挡住的译文，见 2.1 |
+| 被其他窗口挡住的部分不显示译文 | `SetWindowPos` 把覆盖层排在目标窗口正上方，见 2.1 | 覆盖层留在上层，按挡在目标窗口前面的其他应用的窗口（`optionOnScreenAboveWindow`）裁掉被挡住部分的译文和暗化层，见 2.1 |
+| 跟随活动窗口 | `SetWinEventHook` 订阅前台窗口变化（`EVENT_SYSTEM_FOREGROUND`），不需要权限 | 订阅 `NSWorkspace` 的应用激活通知，再从 `CGWindowListCopyWindowInfo` 取前台应用最靠前的普通窗口，不需要权限 |
 | 取词 | UI Automation 的 TextPattern 读取选区；取不到时模拟 Ctrl+C 再读剪贴板，见 4.1 | 辅助功能接口读取选中的文字，需要辅助功能权限，见 4.2 |
 | 全局快捷键 | `RegisterHotKey`，不需要权限 | `RegisterEventHotKey`，不需要权限 |
-| 后续版本：点击鼠标或按键时截屏 | 低级键盘鼠标钩子或 Raw Input，不需要权限；以管理员身份运行的程序在前台时，低级钩子收不到输入，见 4.1 | 监听键盘需要输入监控权限，见 4.2 |
+| 后续版本：点击鼠标或按键时截屏；选中文字后自动弹出按钮 | 低级键盘鼠标钩子或 Raw Input，不需要权限；以管理员身份运行的程序在前台时，低级钩子收不到输入，见 4.1 | 监听键盘需要输入监控权限，见 4.2 |
 | 缩放比例不同的多块显示器 | 声明每显示器 DPI 感知 V2，采集坐标和窗口坐标统一为物理像素 | 按每块显示器的缩放比例，在像素和点之间换算 |
 
 ### 2.1 遮挡的处理方式
 
-两个平台处理遮挡的方式不同，效果相同：被其他窗口挡住的部分不显示译文，见 [产品需求](01-product.md) 5.2。
+两个平台处理遮挡的方式不同，效果相同：被其他窗口挡住的部分既不显示译文，也不压暗挡在前面的窗口，见 [产品需求](01-product.md) 5.2。
 
 Windows 上，`SetWindowPos` 的 `hWndInsertAfter` 参数指定排在被定位窗口前面的窗口，覆盖层可以借此排在目标窗口正上方。目标窗口被激活、提到最前后，覆盖层要重新排序。微软 PowerToys 的"始终置顶"也用 `SetWindowPos` 让自己的边框窗口跟随目标窗口的位置和层级。
 
-macOS 没有官方支持把窗口排在别的应用的窗口正上方：Apple 文档和员工回复都没有给出支持，目标应用被激活时，它的窗口还会盖住覆盖层。所以 macOS 上覆盖层留在上层，按遮挡区域裁掉译文。
+macOS 没有官方支持把窗口排在别的应用的窗口正上方：Apple 文档和员工回复都没有给出支持，目标应用被激活时，它的窗口还会盖住覆盖层。所以 macOS 上覆盖层留在上层，按其他应用窗口的遮挡区域，裁掉这部分的译文和暗化层。
 
 ### 2.2 Windows 上的全屏游戏
 
@@ -102,7 +103,7 @@ macOS 的屏幕采集、取词和输入监听都要用户在"系统设置 > 隐�
 | 屏幕与系统录音 | 单次截图、持续屏幕、图片问 AI 的屏幕画面 | 这几项功能不可用 |
 | 辅助功能 | 取词；取词失败时模拟 Cmd+C | 划词不可用 |
 | 输入监控 | 后续版本的按键触发截屏 | 只能使用定时触发 |
-| 本地网络 | 连接局域网里的后台，例如部署在家庭电脑或 NAS 上的后台；macOS 15 起需要 | 连不上局域网里的后台 |
+| 本地网络 | 连接局域网中的地址：部署在家庭电脑或 NAS 上的后台、局域网里的 AI 服务、自定义 HTTP 请求的目标；macOS 15 起需要 | 这些连接全部失败 |
 
 桌面端对这些权限的要求：
 

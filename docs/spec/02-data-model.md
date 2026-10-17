@@ -205,6 +205,7 @@ $$
 | `batch_seq`、`paragraph_id` | 标识 | 段落 |
 | `shown` | `enum{none, candidate, error}` | 当前显示：空白、某份候选、错误提示 |
 | `shown_candidate` | `ShownRef?` | `shown` 为 `candidate` 时，记录来源、版本和完成标记 |
+| `shown_text` | `string?` | `shown` 为 `candidate` 时，当前显示的译文。写入译文缓存和保存历史记录时使用 |
 | `sources` | `map<string, SourceOutcome>` | 每个翻译源在这一段上的状态 |
 | `end_state` | `enum{complete, partial, provisional, error, aborted}?` | 结束状态，竞速结束后填写 |
 | `via` | `enum{race, reuse, cache}` | 结果的来历：经过竞速、复用上一批次、命中译文缓存 |
@@ -237,7 +238,7 @@ $$
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `base_batch_seq` | `uint64` | 旧画面所属的批次 |
+| `base_frame_id` | `uint64` | 旧画面，即上一个批次的画面 |
 | `frame_id` | `uint64` | 新画面 |
 | `tile` | `uint32` | 方块边长 $t$，像素 |
 | `cols`、`rows` | `uint32` | 方块的列数和行数，$\lceil W/t \rceil$ 和 $\lceil H/t \rceil$ |
@@ -253,18 +254,25 @@ $$
 
 画面的宽或高不是 $t$ 的整数倍时，右边缘或下边缘的方块小于 $t \times t$。
 
-记新画面为 $N$，旧画面为 $O$，第 $k$ 个位移为 $(d_x^k, d_y^k)$，容差为 $\tau$。方块 $T_{u,v}$ 的第 $k$ 位为 1，当且仅当对其中每一个像素 $(x, y)$，以下两条同时成立：
+记新画面为 $N$，旧画面为 $O$，第 $k$ 个位移为 $(d_x^k, d_y^k)$，容差为 $\tau$。称方块 $T_{u,v}$ 在第 $k$ 个位移下一致，指对其中每一个像素 $(x, y)$，以下两条同时成立：
 
 1. $(x - d_x^k,\ y - d_y^k)$ 落在旧画面之内；
 2. 三个颜色通道都满足 $\lvert N_c(x, y) - O_c(x - d_x^k,\ y - d_y^k) \rvert \le \tau$，$c \in \{R, G, B\}$。
+
+各位的取值：
+
+- 第 0 位对全部方块计算，方块在零位移下一致时为 1，否则为 0；
+- 第 $k$ 位（$k \ge 1$）只在 [变化检测](05-change-detection.md) 4.4 节的检验范围内计算，范围内的方块在第 $k$ 个位移下一致时为 1；范围外的方块一律为 0，即使它在这个位移下一致。
+
+所以位为 1 只说明这一块在对应位移下一致，位为 0 不说明不一致。复用判定只用到前一个方向（[运行协调器](04-run-coordinator.md) 4.4），检验范围外的位为 0，只会让少数段落改为重新识别，不会让复用出错。
 
 按这个定义：
 
 - 第 0 位为 1 的方块原地未变，即需求 04 第 3.5 节的"原地未变"；
 - 第 $k$ 位（$k \ge 1$）为 1 的方块，其中的内容是旧画面中对应位置平移 $(d_x^k, d_y^k)$ 得到的，即"平移区域"；
-- 字节为 0 的方块属于"变化区域"。
+- 字节为 0 的方块按"变化区域"处理。
 
-一块纯色背景在任何位移下都一致，它的字节会有多个位为 1。每块记录一组位，用来容纳这种情况：滚动的段落周围常有空白，空白方块同时满足 $(0, 0)$ 和滚动位移；判断段落是否整体平移时，只要求段落覆盖的方块在同一个位移下一致，这些空白方块因此不会妨碍判断。
+一块纯色背景在任何位移下都一致，位于检验范围内时，它的字节会有多个位为 1。每块记录一组位，用来容纳这种情况：滚动的段落周围常有空白，空白方块同时满足 $(0, 0)$ 和滚动位移；判断段落是否整体平移时，只要求段落覆盖的方块在同一个位移下一致，这些空白方块因此不会妨碍判断。
 
 两张画面的宽或高不同时，变化图只有第 0 个位移，全部字节为 0，`changed_ratio` 为 1，即整张画面视为变化。窗口尺寸改变后的重新排版因此按画面变化处理，与需求 04 第 3.5 节一致。
 
@@ -356,14 +364,20 @@ $$
 | 事件 | 字段 | 含义 |
 | --- | --- | --- |
 | `run_state` | `state`：`enum{running, paused, stopped}`；`reason`：`string?` | 运行状态变化 |
-| `batch_start` | `batch_seq`；`frame`：`FrameRef?`；`geometry`：`CaptureGeometry?`；`carried`：`list<Carry>` | 切换到新批次。`frame` 只发给网页显示，`geometry` 只发给本机覆盖层 |
-| `paragraph_add` | `paragraph_id`、`text`（原文）、`language?`、`direction`、`quads`（相对坐标的四边形列表）、`bounds`（相对坐标的外接矩形） | 新出现一个段落 |
+| `batch_start` | `batch_seq`；`frame`：`FrameRef?`；`geometry`：`CaptureGeometry?`；`carried`：`list<Carry>`；`held`：`list<uint32>` | 切换到新批次。`frame` 只发给网页显示，`geometry` 只发给本机覆盖层 |
+| `paragraph_add` | `paragraph_id`、`text`（原文）、`language?`、`direction`、`quads`（相对坐标的四边形列表）、`bounds`（相对坐标的外接矩形）；`takes_over`：`uint32?` | 新出现一个段落 |
+| `held_release` | `paragraph_ids`：`list<uint32>` | 撤下这些保留段落 |
 | `paragraph_show` | `paragraph_id`；`kind`：`enum{text, error}`；`text?`；`source_rank?`；`version?`；`final?`；`error_reason?` | 段落显示的内容变化 |
 | `paragraph_end` | `paragraph_id`、`end_state`、`via` | 段落的竞速结束 |
 | `notice` | `notice_id`；`kind`：`enum{preferred_unavailable}`；`race_node`；`reason`；`active`：`bool` | 整体提示出现或撤下 |
 | `batch_end` | `batch_seq`、`ended_by` | 批次结束 |
 
 `Carry` 记录一个复用段落：新标识 `paragraph_id`、旧标识 `from_paragraph_id`，以及相对坐标的位移 `dx`、`dy`。复用的段落保留原文、显示内容和结束状态，显示端只把它移到新位置。
+
+`held` 列出上一批次中暂时保留显示的段落，即需求 04 第 3.6 节中位置没有变化、要重新识别的段落，标识是它们在上一批次中的段落标识。显示端把这些段落放进一个单独的保留集合，原样显示，与本批次的段落分开编号，所以两者的标识可以相同。本批次 OCR 完成后，每个保留段落恰好有一个去向：
+
+- 被某个新段落接替：这个新段落的 `paragraph_add` 带有 `takes_over`，值为被接替的保留段落的标识。显示端撤下这个保留段落，新段落沿用它的显示内容，直到新段落自己的 `paragraph_show` 到达；
+- 被撤下：它的标识出现在 `held_release` 中。
 
 `FrameRef` 记录批次画面在观看分发中的标识和原始尺寸，观看端按自己的显示尺寸请求合适的分辨率，见 07 显示与排版。
 
@@ -374,7 +388,9 @@ $$
 - 同一条显示流的事件按 `seq` 递增的顺序送达；
 - `batch_start` 先于这个批次的其他事件；
 - 一个段落的 `paragraph_show` 和 `paragraph_end` 在它的 `paragraph_add` 之后，或者它出现在 `batch_start` 的 `carried` 中之后；
-- 收到 `batch_start` 时，上一批次中没有出现在 `carried` 里的段落一律撤下。
+- 收到 `batch_start` 时，上一批次中既不在 `carried`、也不在 `held` 里的段落一律撤下；
+- 本批次的 OCR 和归一化完成或失败时，每个保留段落恰好被接替一次或撤下一次，都在 `batch_end` 之前；OCR 失败、本批次没有新段落时，全部保留段落出现在同一个 `held_release` 中；
+- 运行在 OCR 完成之前暂停或停止时，保留段落留在冻结的显示中；恢复后下一个批次的 `batch_start` 把它们撤下。
 
 一个命中译文缓存的段落依次产生三个事件：`paragraph_add`；`paragraph_show`，其中 `final` 为真、`source_rank` 为 1；`paragraph_end`，其中 `end_state` 为 `complete`、`via` 为 `cache`。
 
@@ -391,6 +407,7 @@ $$
 | `frame` | `FrameRef?` | 当前批次画面 |
 | `geometry` | `CaptureGeometry?` | 当前批次的采集几何 |
 | `paragraphs` | `list<ParagraphView>` | 每个段落的原文、位置、当前显示内容和结束状态 |
+| `held` | `list<ParagraphView>` | 当前的保留段落，标识是上一批次的段落标识 |
 | `notices` | `list<Notice>` | 当前有效的整体提示 |
 
 快照必须等于把第 1 至第 `seq` 个事件依次作用在空状态上得到的结果。接收方发现序号不连续时，即收到的 `seq` 大于上一个 `seq` 加一，丢弃自己的状态，重新取快照，再接收序号更大的事件。观看端断连重连时使用同一套做法（需求 04 第 8.2 节）。
@@ -399,12 +416,12 @@ $$
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `entry_id` | UUID | 第 7 版 UUID，按标识排序即按时间排序 |
-| `kind` | `enum{screenshot, selection, conversation}` | 截图翻译、划词、AI 对话 |
+| `entry_id` | UUID | 第 7 版 UUID，按标识排序即按时间排序。由产生记录的一方生成：桌面端的记录由主程序生成，网页对话面板中直接发起的对话由网页端生成 |
+| `kind` | `enum{screenshot, selection, conversation, node_output}` | 截图翻译、划词、AI 对话、"保存到历史记录"节点的输出 |
 | `created_at` | 墙上时间 | 创建时刻 |
 | `device_id` | UUID | 产生这条记录的电脑 |
 | `run_id` | UUID? | 产生这条记录的运行 |
-| `pinned` | `bool` | 用户标记为保留，容量清理时跳过 |
+| `pinned` | `bool` | 用户标记为保留，容量清理和手动清理时跳过 |
 | `size_bytes` | `uint64` | 占用的存储空间 |
 | `content` | 按 `kind` 而定 | 见下表 |
 
@@ -412,6 +429,7 @@ $$
 | --- | --- |
 | `screenshot` | 截图（无损编码）；每个段落的原文、相对位置、最终显示的译文和结束状态 |
 | `selection` | 选中的文字；译文，或者 AI 对话的全部消息 |
-| `conversation` | 全部消息，每条消息有角色（用户或 AI）、文字、时刻，以及用户主动发送的图片和文本文件附件 |
+| `conversation` | 全部消息，每条消息有角色（用户或 AI）、文字、时刻，以及用户主动发送的图片和文本文件附件。鼠标旁 AI 提示存为一问一答：发给 AI 的画面和提示词作为用户消息，回答作为 AI 消息 |
+| `node_output` | 节点标识、数据类型，以及节点收到的数据本身：图片、段落列表、候选、译文或 AI 回答（[工作流定义](03-workflow.md) 第 2 节） |
 
 历史记录在桌面端和后台怎样存放与加密，见 10 后台平台服务和 12 桌面端。

@@ -25,9 +25,9 @@
 | `http_request` | 1.0 | 自定义 HTTP 请求服务 | 运行协调器 |
 | `coordinator` | 1.0 | 运行协调器 | 主程序 |
 | `registry` | 1.0 | 服务注册 | 各服务、主程序、运行协调器、浏览器 |
-| `auth` | 1.0 | 账号与认证 | 浏览器、设备连接与中转 |
+| `auth` | 1.0 | 账号与认证 | 浏览器、设备连接与中转、服务注册、观看分发 |
 | `viewer` | 1.0 | 观看分发 | 运行协调器、主程序、浏览器 |
-| `config` | 1.0 | 工作流与配置存储 | 浏览器、主程序、运行协调器 |
+| `config` | 1.0 | 工作流与配置存储 | 浏览器、主程序、服务注册，以及读取自身设置的后台服务 |
 | `history` | 1.0 | 历史记录存储 | 主程序、浏览器 |
 
 `hotkey` 和 `window_tracker` 只在桌面端内部使用，不开放给其他设备。
@@ -119,7 +119,7 @@ message Unit {
 message Shift { int32 dx = 1; int32 dy = 2; }
 
 message ChangeMap {
-  uint64 base_batch_seq = 1;
+  uint64 base_frame_id = 1;                             // 上一个批次的画面
   uint64 frame_id = 2;
   uint32 tile = 3;
   uint32 cols = 4;
@@ -148,6 +148,7 @@ message DisplayEvent {
     ParagraphEnd paragraph_end = 14;
     Notice notice = 15;
     BatchEnd batch_end = 16;
+    HeldRelease held_release = 17;
   }
 }
 
@@ -165,6 +166,7 @@ message BatchStart {
   optional FrameRef frame = 2;                          // 只发给网页显示
   optional CaptureGeometry geometry = 3;                // 只发给本机覆盖层
   repeated Carry carried = 4;
+  repeated uint32 held = 5;                             // 上一批次中保留显示的段落
 }
 
 message ParagraphAdd {
@@ -174,7 +176,10 @@ message ParagraphAdd {
   Direction direction = 4;
   repeated QuadRel quads = 5;
   RectRel bounds = 6;
+  optional uint32 takes_over = 7;                       // 接替的保留段落
 }
+
+message HeldRelease { repeated uint32 paragraph_ids = 1; }
 
 message ParagraphShow {
   uint32 paragraph_id = 1;
@@ -220,6 +225,7 @@ message DisplaySnapshot {
   optional CaptureGeometry geometry = 6;
   repeated ParagraphView paragraphs = 7;
   repeated Notice notices = 8;
+  repeated ParagraphView held = 9;                      // 标识是上一批次的段落标识
 }
 
 message ReplyUpdate {                                   // AI 回答的累计文字
@@ -237,15 +243,18 @@ message ReplyUpdate {                                   // AI 回答的累计文
 
 | 方法 | 形态 | 请求 | 回复 | 用途 |
 | --- | --- | --- | --- | --- |
-| `Register` | 双方连续收发 | 服务描述和本机端点 | 登记结果 | 本机服务登记；流关闭即注销 |
-| `ListServices` | 一问一答 | 可选的接口名 | 本机服务列表 | 运行协调器解析 `local` 绑定，取得端点后直接连接 |
+| `Register` | 双方连续收发 | 服务描述和本机端点 | 登记结果；之后这项服务的设置每变化一次，下发一次 | 本机服务登记；流关闭即注销 |
+| `ListServices` | 一问一答 | 可选的接口名 | 本机服务列表 | 运行前检查解析 `local` 绑定，节点编辑器列出本机服务 |
+| `Acquire` | 服务端连续回复 | 服务的登记名称 | 服务就绪时回复描述和本机端点；服务重新登记时再回复一次 | 运行协调器在一次运行期间占用一项本机服务 |
 | `WatchSharing` | 服务端连续回复 | 无 | 屏幕共享开关的当前状态和每次变化 | 运行协调器决定是否向观看分发发送画面 |
 | `SaveHistory` | 一问一答 | 历史记录条目 | 条目标识 | 自动保存和"保存到历史记录"节点 |
 | `Notify` | 一问一答 | 通知的种类和文字 | 无 | 运行协调器请求主程序发出系统通知 |
 
 规则：
 
-- `ListServices` 返回的每一项包含服务描述、本机端点路径，以及是否已开放。保留名称 `bundled.ocr`、`bundled.translate` 在这里解析为这台电脑自带的引擎（[工作流定义](03-workflow.md) 4.2）；
+- `ListServices` 返回的每一项包含服务描述、本机端点路径、是否已开放，以及生效的上限：服务描述中的默认值，被用户调低的值覆盖。保留名称 `bundled.ocr`、`bundled.translate` 在这里解析为这台电脑自带的引擎（[工作流定义](03-workflow.md) 4.2）。桌面端独立使用时没有服务注册，本机的运行协调器按这里的生效上限排队；
+- 运行协调器为一次运行用到的每项本机服务打开一条 `Acquire` 流，从回复中取得端点后直接连接（[服务协议](08-service-protocol.md) 8.3）。服务还没有运行时，主程序先启动它，等它登记后再回复。流打开期间，主程序不按空闲回收这项服务（[桌面端](12-desktop.md) 1.2）。服务崩溃后被主程序重新启动、重新登记时，主程序在同一条流上推送新的描述和端点，运行协调器按服务协议第 11 节检查版本，兼容时恢复可用（[运行协调器](04-run-coordinator.md) 6.3）。运行结束时，运行协调器关闭这些流；
+- 主程序在登记流上向服务下发它的设置：用户调低的并发上限和速率上限、费用上限、单独指定的出站代理（需求 04 第 10 节，需求 01 第 2.5 节）。登记被接受后发一次，用户修改设置后再发一次。服务按收到的设置执行限速、计量和代理；
 - 运行协调器只在屏幕共享开着、并且工作流包含网页显示节点时，才向观看分发发送画面和显示事件（需求 05 第 4.3 节）。共享关闭后，它立即停止发送；观看分发同时丢弃这一路来源的快照；
 - 本机端点路径的长度不超过 100 字节。macOS 的 Unix 域套接字路径上限是 104 字节，超过时无法绑定。
 
@@ -253,7 +262,13 @@ message ReplyUpdate {                                   // AI 回答的累计文
 package sth.agent.v1;
 
 message RegisterRequest { sth.registry.v1.ServiceManifest manifest = 1; string endpoint = 2; }
-message RegisterReply { bool accepted = 1; string reason = 2; }
+message RegisterReply {
+  oneof msg {
+    RegisterResult result = 1;                          // 第一条
+    sth.config.v1.ServiceSettings settings = 2;         // 登记被接受后发一次，设置变化时再发
+  }
+}
+message RegisterResult { bool accepted = 1; string reason = 2; }
 
 message ListServicesRequest { optional string interface = 1; }
 message LocalService {
@@ -261,8 +276,12 @@ message LocalService {
   string endpoint = 2;              // 命名管道名或 Unix 域套接字路径
   bool exposed = 3;
   repeated string aliases = 4;      // 例如 bundled.ocr
+  sth.registry.v1.Limits effective_limits = 5;          // 默认值被用户调低的值覆盖之后
 }
 message ListServicesReply { repeated LocalService services = 1; }
+
+message AcquireRequest { string service = 1; }          // 登记名称
+message AcquireReply { sth.registry.v1.ServiceManifest manifest = 1; string endpoint = 2; }
 
 message SharingState { bool enabled = 1; }
 
@@ -296,7 +315,7 @@ message NotifyRequest {
 | 消息 | 内容 |
 | --- | --- |
 | `Started` | 采集已开始，附带采集几何 |
-| `Batch` | 批次序号、批次画面、相对上一批次的变化图；运行的第一个批次没有变化图 |
+| `Batch` | 画面编号 `frame_id`、批次画面、相对上一批次画面的变化图；会话的第一个批次没有变化图。批次序号由运行协调器编号（[运行协调器](04-run-coordinator.md) 3.1） |
 | `NoBatch` | 等待时长内没有被接受的画面 |
 | `Paused`、`Resumed` | 确认暂停和恢复 |
 | `Interrupted` | 采集在平台之外被中止，附带原因 |
@@ -308,10 +327,12 @@ message NotifyRequest {
 | 原因 | 情形 |
 | --- | --- |
 | `USER_STOPPED` | 用户在 macOS 菜单栏的屏幕共享指示中结束了采集（需求 07 第 5.2 节） |
-| `TARGET_CLOSED` | 采集的目标窗口被关闭 |
+| `TARGET_CLOSED` | 采集范围是固定的窗口，这个窗口被关闭。跟随活动窗口时不报告，屏幕采集服务改为采集下一个前台窗口 |
 | `DISPLAY_REMOVED` | 采集的显示器被移除 |
 | `SYSTEM_STOPPED` | 系统停止了采集 |
 | `PERMISSION_REVOKED` | 屏幕录制权限被撤销 |
+
+运行协调器对 `TARGET_CLOSED` 和 `DISPLAY_REMOVED` 停止运行：采集范围已经不存在，运行中又不能更换范围（需求 04 第 8.3 节）。对其余原因按暂停处理。
 
 ```proto
 package sth.capture.v1;
@@ -359,10 +380,9 @@ message SessionServerMessage {
 }
 message Started { sth.model.v1.CaptureGeometry geometry = 1; }
 message Batch {
-  uint64 batch_seq = 1;
-  uint64 frame_id = 2;
-  sth.model.v1.Image frame = 3;
-  optional sth.model.v1.ChangeMap change_map = 4;
+  uint64 frame_id = 1;                                  // 批次序号由运行协调器编号
+  sth.model.v1.Image frame = 2;
+  optional sth.model.v1.ChangeMap change_map = 3;
 }
 message NoBatch {}
 message Paused {}
@@ -451,9 +471,9 @@ message Failure {
 
 | 方法 | 形态 | 请求 | 回复 |
 | --- | --- | --- | --- |
-| `Attach` | 客户端连续发送 | 第一条为 `OverlayStart`，之后是显示事件 | 无 |
+| `Attach` | 客户端连续发送 | 第一条为 `OverlayStart`，第二条为显示快照，之后是显示事件 | 无 |
 
-`OverlayStart` 给出运行标识、显示流标识和采集范围；采集范围是窗口时，覆盖层用窗口跟踪服务跟随它（[显示与排版](07-display.md) 2.1）。之后运行协调器按顺序发送这条显示流的全部事件。
+`OverlayStart` 给出运行标识、显示流标识、采集范围和目标语言；采集范围是窗口时，覆盖层用窗口跟踪服务跟随它（[显示与排版](07-display.md) 2.1）。之后运行协调器先发送这条显示流当前的显示快照，再按顺序发送此后的事件。每次打开 `Attach` 流都是如此，包括后台断连、主程序经 `coordinator.Attach` 接上运行后重新打开的流：断连期间的事件不会补发，覆盖层从快照恢复（[显示与排版](07-display.md) 第 1 节）。
 
 运行停止时，运行协调器发送 `HalfClose`。覆盖层保留停止瞬间的绘制（需求 04 第 6 节），直到用户用"显示或隐藏覆盖层"快捷键隐藏它，或者开始新的持续屏幕运行，然后以 `ok` 结束流。流因为连接中断而结束时，覆盖层同样保留最后的绘制；运行协调器不可用的提示由主程序以系统通知发出，不画在覆盖层上，显示画面上的提示仍只有需求 04 第 7 节规定的两种。
 
@@ -464,12 +484,14 @@ message AttachMessage {
   oneof msg {
     OverlayStart start = 1;
     sth.model.v1.DisplayEvent event = 2;
+    sth.model.v1.DisplaySnapshot snapshot = 3;
   }
 }
 message OverlayStart {
   string run_id = 1;
   string stream_id = 2;
   sth.capture.v1.CaptureRange range = 3;
+  string target_language = 4;                          // 判断译文是否竖排时使用
 }
 ```
 
@@ -485,7 +507,8 @@ message OverlayStart {
 
 | 消息 | 内容 |
 | --- | --- |
-| `CardStart` | 窗口种类（截图浮卡、划词浮卡、对话面板）、要显示的图片、位置提示、要复用的已有窗口。必须是第一条消息 |
+| `CardStart` | 窗口种类（截图浮卡、划词浮卡、对话面板）、要显示的图片、位置提示、要复用的已有窗口、目标语言。必须是第一条消息 |
+| `sth.model.v1.DisplaySnapshot` | 截图浮卡译文层的显示快照，紧跟在 `CardStart` 之后（[显示与排版](07-display.md) 第 1 节） |
 | `sth.model.v1.DisplayEvent` | 截图浮卡的译文层 |
 | `CandidateUpdate` | 划词浮卡的译文：累计文字、版本、完成标记 |
 | `sth.model.v1.ReplyUpdate` | AI 的回答 |
@@ -505,7 +528,8 @@ message OverlayStart {
 
 - 用户关闭窗口时，服务发送 `Closed` 后以 `ok` 结束流，运行协调器随即结束这次运行（[运行协调器](04-run-coordinator.md) 2.1）；
 - 划词浮卡只显示译文时，上面的"问 AI"按钮由主程序直接处理：主程序以同一段文字触发划词入口的 `ask_ai` 端口，发起一次新的运行，新运行的 `CardStart` 指定复用这张浮卡（[工作流定义](03-workflow.md) 5.2）。旧运行的流随即以 `ok` 结束；
-- 覆盖层交互模式中点击段落弹出的浮卡，也由主程序直接显示原文和完整译文，不经运行协调器；把这一段交给 AI 时，同样发起一次新的划词运行。
+- 覆盖层交互模式中点击段落弹出的浮卡，也由主程序直接显示原文和完整译文，不经运行协调器；把这一段交给 AI 时，同样发起一次新的划词运行；
+- 浮卡不能被激活。用户按"让最近一张浮卡获得键盘焦点"的快捷键时，主程序让最近一张浮卡临时可以被激活并获得键盘焦点，用户在其中输入追问；追问发出、或者用户按 Esc 后，浮卡恢复为不可激活，焦点回到原来的窗口（需求 01 第 5.3 节）。桌面对话面板是普通窗口，用户点击即可输入（[桌面端](12-desktop.md) 3.3、4.4）。
 
 ```proto
 package sth.card.v1;
@@ -517,6 +541,7 @@ message CardClientMessage {
     CandidateUpdate candidate = 3;
     sth.model.v1.ReplyUpdate reply = 4;
     CardError error = 5;
+    sth.model.v1.DisplaySnapshot snapshot = 6;
   }
 }
 message CardStart {
@@ -526,6 +551,7 @@ message CardStart {
   optional Anchor anchor = 3;
   optional string reuse_card_id = 4;
   string run_id = 5;
+  string target_language = 6;                          // 截图浮卡判断译文是否竖排时使用
 }
 message Anchor { double x = 1; double y = 2; }          // 桌面坐标
 message CandidateUpdate { string text = 1; uint32 version = 2; bool final = 3; }
@@ -555,7 +581,7 @@ message Closed {}
 | --- | --- | --- | --- |
 | `Show` | 客户端连续发送 | 第一条为 `HintStart`（鼠标位置），之后是 `sth.model.v1.ReplyUpdate` | 无 |
 
-提示随回答逐步显示。回答带完成标记后，运行协调器发送 `HalfClose`，运行结束，提示留在屏幕上；用户点击别处或按 Esc 时提示消失，服务以 `ok` 结束流。回答完成之前提示就被关闭的，运行协调器取消尚未完成的 AI 请求，运行随之结束（[运行协调器](04-run-coordinator.md) 2.1）。
+提示随回答逐步显示。回答带完成标记后，运行协调器发送 `HalfClose`，运行结束，提示留在屏幕上；用户点击别处或按 Esc 时提示消失，服务以 `ok` 结束流。提示窗口不接收点击，也不能被激活，所以提示显示期间，主程序临时把 Esc 注册为全局快捷键，并监听全局的鼠标按下事件，提示消失后立即注销，实现方式见 [桌面端](12-desktop.md) 3.3、4.4。这段时间里，前台程序收不到 Esc。回答完成之前提示就被关闭的，运行协调器取消尚未完成的 AI 请求，运行随之结束（[运行协调器](04-run-coordinator.md) 2.1）。
 
 ```proto
 package sth.hint.v1;
@@ -587,6 +613,8 @@ message HintStart { string run_id = 1; double x = 2; double y = 3; }   // 鼠标
 | --- | --- | --- |
 | `Follow` | 服务端连续回复 | 跟随一个窗口：外框位置变化、最小化、还原、关闭 |
 | `ActiveWindow` | 服务端连续回复 | 活动窗口的变化，供"跟随活动窗口"的采集范围使用 |
+
+`ActiveWindow` 报告的是用户正在使用的其他应用的窗口：前台是平台自己的窗口，例如主窗口或浮卡时，不报告，采集范围保持原来的窗口。当前窗口关闭后，下一个成为前台的窗口照常报告，屏幕采集服务改为采集它（需求 04 第 8.3 节）。
 
 窗口外框的确切定义、遮挡的处理，见 12 桌面端。
 
@@ -701,7 +729,7 @@ message ParagraphFailed { uint32 paragraph_id = 1; sth.wire.v1.Status status = 2
 
 追问时，运行协调器把此前的全部轮次放进 `messages` 重新发送，服务不保存对话状态。网页对话面板中就一段译文问 AI 时，浏览器直接经设备连接与中转调用 `llm.Chat`（需求 01 第 6 节）。
 
-计量由服务自己完成。服务描述中声明了计量方式的服务，即 AI 适配服务，以及调用外部付费接口的翻译服务，每次调用结束后按声明的方式累计用量；达到费用上限时，此后的调用以 `quota_exceeded` 结束（需求 04 第 10 节）。用量定期报告给服务注册，供网页端显示。费用上限的设置见第 20 节。
+计量由服务自己完成。执行计量的服务是 AI 适配服务和自定义 HTTP 请求服务（第 15 节）：每次调用结束后按服务描述中声明的方式累计用量，并立即报告给服务注册，供网页端显示；达到费用上限时，此后的调用以 `quota_exceeded` 结束（需求 04 第 10 节）。服务重启后，先经 `registry.GetUsage` 读回本计费周期已经报告的用量，再继续累计，已经达到上限的服务不会因为重启被重新放行。费用上限的设置见第 20 节。
 
 ```proto
 package sth.llm.v1;
@@ -735,8 +763,22 @@ message Params {
 | 方法 | 形态 | 请求 | 回复 |
 | --- | --- | --- | --- |
 | `Send` | 一问一答 | 方法、地址、请求头、请求体 | 状态码、响应头、响应体、经过的重定向 |
+| `CheckCredentials` | 一问一答 | 凭据名称的列表 | 其中在这台设备上不存在的名称 |
 
-运行协调器按节点的模板填好请求，再交给绑定位置上的服务发出；收到回复后，运行协调器按节点配置的 JSON 指针取出文字，转成译文候选或 AI 回答（[工作流定义](03-workflow.md) 3.2）。服务在发出前，把请求头和请求体中的 `{{credential:名称}}` 替换为这台设备上保存的凭据，并执行 [安全](11-security.md) 第 9 节的限制。
+运行协调器按节点的模板填好请求，再交给绑定位置上的服务发出；收到回复后，运行协调器按节点配置的 JSON 指针取出文字，转成译文候选或 AI 回答（[工作流定义](03-workflow.md) 3.2）。服务在发出前，把请求头和请求体中的 `{{credential:名称}}` 替换为这台设备上保存的凭据，并执行 [安全](11-security.md) 第 9 节的限制。`CheckCredentials` 供运行前检查使用（[工作流定义](03-workflow.md) 6.3 第 5 条），只回答名称是否存在，不返回凭据的内容。
+
+节点作为翻译源或 AI 节点时，运行协调器按下表把外部接口的回复归入失败的两类（[运行协调器](04-run-coordinator.md) 6.3）：
+
+| 回复 | 处理 |
+| --- | --- |
+| 状态码 2xx，按 JSON 指针取到了文字 | 成功 |
+| 状态码 429 | 按 `rate_limited` 处理，属于整体不可用；有 `Retry-After` 响应头时，按它换算重试等待时间 |
+| 状态码 503，或者连不上外部地址、TLS 握手失败、请求超时之前没有收到响应头 | 按 `unavailable` 处理，属于整体不可用 |
+| 其他非 2xx 状态码；响应体不是合法的 JSON；JSON 指针取不到文字 | 按 `engine_error` 处理，属于单段失败 |
+
+429 和 503 是服务商限流或暂时不可用的标准回复，与请求的内容无关，归入整体不可用：首选源被限流时，段落保留其他源的临时译文，并给出整体提示，不会每一段都变成错误提示（需求 03 第 5.4 节）。
+
+自定义 HTTP 请求服务执行计量和费用上限：按目标地址的主机分别累计调用次数，费用上限也按主机设置（第 20 节）。外部翻译接口经这种节点接入（需求 04 第 10 节），翻译服务本身不访问外部网络。某个主机达到上限后，发往它的请求以 `quota_exceeded` 结束，直到用户调高上限或进入下一个计费周期。服务发出请求时，按设置选择出站代理（需求 01 第 2.5 节）。
 
 ## 16 运行协调器：`coordinator`
 
@@ -833,14 +875,19 @@ message AttachRequest { string run_id = 1; }   // Attach 流的第一条消息�
 
 | 方法 | 形态 | 用途 |
 | --- | --- | --- |
-| `Register` | 双方连续收发 | 后台服务登记自己；主程序登记这台电脑开放的服务和全部本机服务的目录，开放范围变化时发送新的列表。流关闭即注销 |
+| `Register` | 双方连续收发 | 后台服务登记自己；主程序登记这台电脑开放的服务和全部本机服务的目录，开放范围变化、本机服务登记或注销时发送新的列表。流关闭即注销 |
 | `Query` | 一问一答 | 按接口名、位置查询服务及其描述，供节点编辑器和运行前检查使用 |
-| `Watch` | 服务端连续回复 | 订阅服务和设备的变化：登记、注销、设备上线、设备离线、费用上限变化 |
-| `ReportUsage` | 一问一答 | AI 适配服务等报告用量 |
+| `Watch` | 服务端连续回复 | 订阅服务和设备的变化：登记、注销、设备上线、设备离线、设备已撤销、费用上限变化 |
+| `ReportUsage` | 一问一答 | 执行计量的服务每次调用结束后报告用量 |
+| `GetUsage` | 一问一答 | 按设备、服务、目标主机和计费周期查询用量，供网页端显示，也供计量服务重启后读回本周期的用量 |
 
 运行协调器在运行期间订阅 `Watch`，据此维护每个服务实例的可用状态，判断整体不可用何时恢复（[运行协调器](04-run-coordinator.md) 6.3）。
 
-主程序登记的"本机服务目录"只含描述，不可调用：它让网页端的节点编辑器为 `local` 绑定列出候选服务（[网页端](13-web.md) 5.2）。`Query` 的结果为每个服务标明能否调用，以及生效的并发上限和速率上限：服务描述中的默认值，被用户调低的值覆盖（第 20 节）。
+"设备已撤销"与"设备离线"分开：服务注册订阅 `auth.WatchRevocations`（第 18 节），某台电脑被撤销时，删除它登记的全部服务，并发出"设备已撤销"。运行协调器收到后，立即停止这台电脑发起的运行，不进入断连的宽限期（[运行协调器](04-run-coordinator.md) 第 12 节）。
+
+"费用上限变化"来自工作流与配置存储：服务注册订阅 `config.WatchServiceSettings`（第 20 节），后台服务的设置变化时，重新计算生效的上限并发出这个事件。电脑上的服务，生效的上限随主程序发布的列表一起更新。
+
+主程序登记的"本机服务目录"只含描述，不可调用：它让网页端的节点编辑器为 `local` 绑定列出候选服务（[网页端](13-web.md) 5.2）。`Query` 的结果为每个服务标明能否调用，以及生效的并发上限和速率上限：服务描述中的默认值，被用户调低的值覆盖。后台服务的调低值来自第 20 节的设置，电脑开放的服务的生效上限由主程序在 `AgentPublish` 中给出。
 
 服务描述的字段见 [服务协议](08-service-protocol.md) 第 12 节，编码如下：
 
@@ -887,9 +934,29 @@ message RegisterMessage {                  // Register 流中由登记方发送
   }
 }
 message AgentPublish {
-  repeated ServiceManifest exposed = 1;     // 可以调用
+  repeated PublishedService exposed = 1;    // 可以调用
   repeated ServiceManifest catalog = 2;     // 只用于节点编辑器列出候选，不可调用
 }
+message PublishedService {
+  ServiceManifest manifest = 1;
+  Limits effective_limits = 2;              // 这台电脑上的设置覆盖默认值之后
+}
+
+message UsageQuery {
+  optional string device = 1;
+  optional string service = 2;
+  optional string target_host = 3;          // 只对自定义 HTTP 请求服务有意义
+  optional string period = 4;               // 计费周期，例如 2026-10；不填为当前周期
+}
+message UsageRecord {
+  string device = 1;
+  string service = 2;
+  string target_host = 3;                   // 不按主机计量的服务为空
+  string period = 4;
+  uint64 calls = 5;
+  uint64 units = 6;                         // 按服务的计量方式：调用次数、字符或词元
+}
+message UsageReply { repeated UsageRecord records = 1; }
 
 message ServiceInfo {                       // Query 的结果
   sth.wire.v1.Address address = 1;
@@ -918,6 +985,32 @@ message ServiceInfo {                       // Query 的结果
 | `ChangePassword` | 一问一答 | 修改密码，其他会话随即失效 |
 | `BeginTotp`、`ConfirmTotp`、`DisableTotp`、`RegenerateRecoveryCodes` | 一问一答 | 二步验证与恢复码 |
 | `VerifyDevice`、`VerifySession` | 一问一答 | 设备连接与中转在握手时调用，验证设备签名和浏览器会话 |
+| `WatchRevocations` | 服务端连续回复 | 推送撤销：被撤销的电脑，以及失效的会话。设备连接与中转、服务注册和观看分发订阅 |
+
+`VerifyDevice` 和 `VerifySession` 只在握手时调用，已经建立的连接要靠 `WatchRevocations` 断开。以下情况发生时，账号与认证在同一个事务中改好数据库，再推送一条撤销：
+
+| 情况 | 推送的内容 |
+| --- | --- |
+| 主人撤销某台电脑 | 这台电脑的设备标识 |
+| 主人注销某个会话 | 这个会话的标识 |
+| 修改密码 | 除当前会话外的全部会话 |
+| 在服务器上用命令行重置密码或二步验证 | 全部会话 |
+| 会话到达空闲超时或绝对有效期 | 这个会话的标识 |
+
+订阅者收到后各自处理：设备连接与中转立即关闭相应的连接（[后台平台服务](10-backend.md) 第 2 节）；服务注册删除被撤销电脑登记的服务，并经 `Watch` 发出"设备已撤销"（第 17 节）；观看分发让被撤销电脑的来源立即下线（[后台平台服务](10-backend.md) 5.2）。订阅流断开后重新订阅时，先收到全部当前有效的撤销，再收到之后的变化，期间漏掉的撤销因此不会遗漏。
+
+注销会话、修改密码和命令行重置，同时作废相应浏览器的"已知浏览器"标记（[安全](11-security.md) 2.2）。
+
+```proto
+package sth.auth.v1;
+
+message Revocation {
+  oneof target {
+    string device_id = 1;                   // 被撤销的电脑
+    string session_id = 2;                  // 失效的会话
+  }
+}
+```
 
 `BeginTotp` 返回新的密钥和 `otpauth://` 地址，网页端据此显示二维码；用户用验证器给出的口令调用 `ConfirmTotp` 后，二步验证才生效，同时返回恢复码。这一步确认防止用户在验证器没有正确添加时就开启二步验证、把自己锁在门外。
 
@@ -939,7 +1032,9 @@ message ServiceInfo {                       // Query 的结果
 - `Publish` 流打开后，运行协调器先发送 `PublishStart`，再发送当前的显示快照和当前批次画面，之后才发送事件。运行中途打开共享、断线后重新发布时同样如此：观看分发据此从完整的状态开始，复用段落的原文和位置不会缺失；
 - `Publish` 中，批次画面以 `BatchFrame` 消息发送，必须先于引用它的 `batch_start` 事件；
 - `GetFrame` 返回宽度为 $\min(w, W)$ 的画面，同一张画面、同一个宽度和质量只编码一次（[显示与排版](07-display.md) 3.1）。浏览器在请求中列出能解码的格式，服务优先返回 WebP；
-- `Subscribe` 的流量控制按 [服务协议](08-service-protocol.md) 第 5 节进行。观看端处理得慢、额度耗尽时，观看分发只记下这个订阅者落后了；额度恢复后，先发送一份新的快照，再从最新的状态继续。
+- `Subscribe` 的流量控制按 [服务协议](08-service-protocol.md) 第 5 节进行。观看端处理得慢、额度耗尽时，观看分发只记下这个订阅者落后了；额度恢复后，先发送一份新的快照，再从最新的状态继续；
+- 观看分发订阅 `auth.WatchRevocations`（第 18 节）：某台电脑被撤销时，按 [后台平台服务](10-backend.md) 5.2 关闭共享的同样步骤，让它的来源立即下线；
+- `PublishDialog` 和 `SubscribeDialogs` 传送 `DialogMessage`：运行协调器把网页对话面板节点的每一份回答更新，连同运行、节点、发起运行的电脑和轮次一起发出；网页端按运行和节点把回答归到各自的对话中，多次运行同时推送时不会混在一起。
 
 ```proto
 package sth.viewer.v1;
@@ -956,7 +1051,7 @@ message PublishStart {
   string run_id = 1;
   string stream_id = 2;
   string device_id = 3;
-  string range_label = 4;                   // 来源列表中区分同一电脑多路来源的说明
+  string range_label = 4;                   // 采集范围的说明，显示在来源列表中
   string target_language = 5;
 }
 message BatchFrame { string image_id = 1; uint64 batch_seq = 2; sth.model.v1.EncodedImage image = 3; }
@@ -970,6 +1065,13 @@ message SubscribeReply {
     sth.model.v1.DisplaySnapshot snapshot = 1;
     sth.model.v1.DisplayEvent event = 2;
   }
+}
+
+message DialogMessage {
+  string run_id = 1;
+  string node_id = 2;                       // 网页对话面板节点
+  string device_id = 3;                     // 发起运行的电脑
+  sth.model.v1.ReplyUpdate reply = 4;       // 其中的 turn 区分轮次
 }
 
 message GetFrameRequest {
@@ -987,15 +1089,65 @@ message GetFrameRequest {
 | `ListWorkflows`、`GetWorkflow` | 一问一答 | 读取工作流 |
 | `SaveWorkflow` | 一问一答 | 保存工作流，附带编辑时的修订号 |
 | `DeleteWorkflow` | 一问一答 | 删除工作流 |
-| `GetSettings`、`SaveSettings` | 一问一答 | 平台设置，例如后台历史记录的容量上限、出站代理 |
-| `GetServiceSettings`、`SaveServiceSettings` | 一问一答 | 后台服务的上限设置：用户调低的并发上限和速率上限，费用上限和计费周期 |
-| `WatchServiceSettings` | 服务端连续回复 | 执行计量的后台服务订阅自己的费用上限，上限变化时立即生效 |
+| `GetSettings`、`SaveSettings` | 一问一答 | 平台设置，例如后台历史记录的容量上限、全局出站代理 |
+| `GetServiceSettings`、`SaveServiceSettings` | 一问一答 | 后台服务的设置：用户调低的并发上限和速率上限，费用上限，单独指定的出站代理 |
+| `WatchServiceSettings` | 服务端连续回复 | 订阅服务设置：后台服务订阅自己的设置，服务注册订阅全部后台服务的设置，变化时立即推送 |
+| `ListExternalServices`、`SaveExternalService`、`DeleteExternalService` | 一问一答 | 网页端管理后台的 AI 服务，以及后台自定义 HTTP 请求使用的命名凭据（需求 01 第 6 节） |
+| `WatchExternalServices` | 服务端连续回复 | 后台的 AI 适配服务和自定义 HTTP 请求服务订阅外部服务配置，包括凭据的内容 |
 
 `SaveWorkflow` 的提交修订号与已保存的修订号不同时，回复中给出冲突和当前的修订号，不覆盖已有内容（[工作流定义](03-workflow.md) 第 1 节）。冲突不算调用失败，以回复内容表示。
 
 保存前，服务按 [工作流定义](03-workflow.md) 6.2 做静态校验，校验结果随回复返回：不通过的工作流照常保存，状态为"编辑中"。
 
-上限设置按服务所在的位置分开保存（需求 04 第 10 节）：后台服务的设置保存在这里；电脑上的服务的设置保存在那台电脑的主程序中，主程序在服务的登记流上把设置下发给它。两边的设置都通过服务注册的 `Query` 体现为生效的上限，运行协调器据此排队（[运行协调器](04-run-coordinator.md) 7.2），执行计量的服务据此判断是否达到费用上限。
+服务设置按服务所在的位置分开保存（需求 04 第 10 节）：
+
+- 后台服务的设置保存在这里。服务注册订阅全部后台服务的设置，算出生效的上限，设置变化时经 `registry.Watch` 发出"费用上限变化"（第 17 节）；执行计量的服务和访问外部网络的服务订阅自己的设置，按其中的费用上限和代理执行；
+- 电脑上的服务的设置保存在那台电脑的主程序中，主程序在服务的登记流上把设置下发给它（第 3 节），并在发布给服务注册的列表中带上生效的上限。
+
+两边的设置都通过服务注册的 `Query` 体现为生效的上限，运行协调器据此排队（[运行协调器](04-run-coordinator.md) 7.2）。计费周期按协调世界时的自然月计算，与用量表的周期一致（[后台平台服务](10-backend.md) 第 4 节）。
+
+外部服务配置记录后台的 AI 服务和命名凭据。每个 AI 服务有名称、兼容 OpenAI 聊天补全接口的地址、模型、提供的能力（对话、视觉、翻译）、计量方式和所用凭据的名称；AI 适配服务按这份配置，为每个 AI 服务登记一项服务，配置变化时重新登记（[技术选型](15-tech-selection.md) 第 8 节）。命名凭据供后台的自定义 HTTP 请求按名称引用（第 15 节）。`ListExternalServices` 只返回凭据的名称，不返回内容；凭据的内容只经 `WatchExternalServices` 交给 AI 适配服务和自定义 HTTP 请求服务，网页端保存后不再显示（[安全](11-security.md) 7.2）。
+
+```proto
+package sth.config.v1;
+
+message ServiceSettings {
+  sth.wire.v1.Address service = 1;
+  optional sth.registry.v1.Limits lowered_limits = 2;  // 用户调低的上限，只能低于默认值
+  optional CostCap cost_cap = 3;
+  repeated HostCostCap host_caps = 4;                  // 自定义 HTTP 请求按目标主机设置
+  optional ProxySetting proxy = 5;                     // 不填时使用全局设置
+}
+message CostCap {
+  enum Unit { UNIT_UNSPECIFIED = 0; CALLS = 1; CHARACTERS = 2; TOKENS = 3; }
+  Unit unit = 1;
+  uint64 limit = 2;                                    // 每个计费周期的上限
+}
+message HostCostCap { string host = 1; CostCap cap = 2; }
+message ProxySetting {
+  enum Mode { MODE_UNSPECIFIED = 0; GLOBAL = 1; DIRECT = 2; CUSTOM = 3; }
+  Mode mode = 1;
+  optional string url = 2;                             // CUSTOM 时为 http:// 或 socks5:// 地址
+}
+
+message ExternalService {
+  string name = 1;
+  oneof kind {
+    AiService ai = 2;
+    NamedCredential credential = 3;
+  }
+}
+message AiService {
+  string base_url = 1;
+  string model = 2;
+  repeated string capabilities = 3;                    // llm、vision、translate
+  sth.registry.v1.ServiceManifest.Metering metering = 4;
+  string credential_name = 5;
+}
+message NamedCredential {
+  optional string value = 1;                           // 只出现在保存请求和 WatchExternalServices 中
+}
+```
 
 ## 21 历史记录存储：`history`
 
@@ -1005,11 +1157,14 @@ message GetFrameRequest {
 | `List` | 一问一答 | 浏览器、主程序 | 按种类、时间、是否保留分页列出 |
 | `Get` | 一问一答 | 浏览器、主程序 | 读取一条记录的完整内容 |
 | `Delete`、`SetPinned` | 一问一答 | 浏览器、主程序 | 删除记录、标记保留 |
-| `Clean` | 一问一答 | 浏览器 | 按时间或种类手动清理 |
-| `WatchDeletions` | 服务端连续回复 | 主程序 | 接收在网页端删除的记录，删除本机的对应副本 |
+| `Clean` | 一问一答 | 浏览器、主程序 | 按时间或种类手动清理 |
+| `WatchChanges` | 服务端连续回复 | 主程序 | 接收在网页端发生的删除和保留标记变化，同步本机的对应副本 |
 
 规则：
 
-- 主程序上传的条目，标识由主程序生成，为第 7 版 UUID，重复上传同一条目不会产生两份记录；桌面端独立使用时产生的记录，在重新连接后台后上传（需求 01 第 8 节）。浏览器上传的网页对话，标识由历史记录存储生成，设备标识记为后台；
-- 写入时超过容量上限，从最旧的记录开始删除，标记为保留的记录不删除（需求 01 第 8 节）；
-- 在网页端删除一条记录，后台删除自己的副本；记录来自某台电脑时，再通知这台电脑删除本机副本，电脑当时不在线的，下次连接时收到通知。后台产生的记录没有本机副本，不发通知。
+- 条目标识为第 7 版 UUID，由产生记录的一方生成：桌面端的记录由主程序生成，网页对话面板中直接发起的对话由网页端生成，设备标识记为后台。主程序上传的条目，标识已经存在时跳过，重复上传不会产生两份记录；
+- 网页对话每轮回答完成后，网页端就用同一个标识上传一次整段对话，后台用新内容覆盖原来的条目。页面被关掉或网络中断，最多丢失还没有完成的那一轮，重新上传也不会产生重复条目；
+- 主程序连着后台时，每保存一条记录就上传一条；上传失败的，以及独立使用时产生的记录，在下次连接时补传（需求 01 第 8 节）；
+- 写入时超过容量上限，从最旧的记录开始删除，标记为保留的记录不删除。容量清理只删除后台自己的副本，不通知电脑（需求 01 第 8 节）；
+- 用户在网页端删除记录，或者按时间、种类手动清理，后台删除自己的副本，手动清理跳过标记为保留的记录；被删除的记录来自某台电脑时，再通知这台电脑删除本机副本。用户在网页端标记或取消保留，同样通知来源电脑。电脑当时不在线的，下次连接时经 `WatchChanges` 收到；
+- 用户在桌面端删除、手动清理或改变保留标记时，主程序对已经上传的记录调用 `Delete`、`SetPinned`，同步后台的副本；离线时记下，连上后补做。后台产生的记录没有本机副本，不发通知。

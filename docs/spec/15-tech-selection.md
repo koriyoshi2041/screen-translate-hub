@@ -48,7 +48,7 @@ Rust 的四个构建目标都是第 1 级支持的平台：Windows x64（MSVC）
 | 点击穿透作用于整个窗口，没有转发鼠标移动的选项 | 覆盖层的交互模式按快捷键整体切换（需求 01 第 5.2 节），不需要局部穿透 |
 | 有报告称 macOS 打包后仍出现 Dock 图标，问题关闭时没有关联的修复 | 在 macOS 15 以上的打包产物上自测，同时在启动时把激活策略设为 accessory |
 
-窗口的扩展样式由 tao 统一生成，所以窗口属性通过 Tauri 的接口设置，不直接改写样式位，避免两边互相覆盖。
+窗口的扩展样式由 tao 统一生成，所以窗口属性通过 Tauri 的接口设置，不直接改写样式位，避免两边互相覆盖。[桌面端](12-desktop.md) 3.3 还要求两项设置：不在任务栏和 Alt+Tab 中出现（`WS_EX_TOOLWINDOW`），以及点击浮卡时不激活它（`WM_MOUSEACTIVATE` 返回 `MA_NOACTIVATE`）。前者在 Tauri 有对应接口时经接口设置，没有时由主程序在窗口创建后设置，并在 tao 每次改写扩展样式后重新设置；后者用窗口子类化处理消息，不涉及样式位。两项都列入第 13 节，在原型阶段验证。
 
 ### 3.2 Windows 系统集成
 
@@ -68,7 +68,7 @@ macOS 上必须调用 Swift 和 Objective-C 接口的部分用 Swift 实现，�
 | 变化检测算法 | Rust 库 | 同一个 Rust 库 |
 | 框选截图 | Tauri 窗口，截图用 Rust | Tauri 窗口，截图用 Swift 调用 `SCScreenshotManager` |
 | 取词 | Rust，UI 自动化，可以使用 uiautomation 库 | Swift，辅助功能接口，可以复用 SelectedTextKit（MIT） |
-| 本机覆盖层、浮卡与对话面板、鼠标旁提示 | Tauri 窗口，Rust 设置窗口样式 | Tauri 窗口，经 tauri-nspanel 设置为非激活面板 |
+| 本机覆盖层、浮卡与对话面板、鼠标旁提示 | Tauri 窗口，Rust 设置窗口样式 | Tauri 窗口；覆盖层、浮卡和提示经 tauri-nspanel 设置为非激活面板，对话面板是普通窗口 |
 | 快捷键与输入事件 | Rust，global-hotkey 调用 `RegisterHotKey` | Rust，global-hotkey 调用 `RegisterEventHotKey`；需要快捷键录制界面时用 KeyboardShortcuts（MIT） |
 | 窗口跟踪 | Rust，`SetWinEventHook` | Swift，读取 `CGWindowListCopyWindowInfo` |
 
@@ -170,20 +170,27 @@ PP-OCRv6 有两个缺口：不识别韩文和阿拉伯文，官方也没有竖�
 - manga-ocr 的训练数据 Manga109-s 允许把训练结果用于商业目的，条件是发布时写明使用了这份数据集。模型管理的说明和项目的第三方声明中都要写明；
 - comic-text-and-bubble-detector 的模型卡没有写训练数据的来源。首版采用它，同时把训练数据来源列入第 13 节，在原型阶段向作者确认；确认不了时，改用 PP-OCRv5 的检测模型输出文字行，再按列间距合并成对白块，这条退路的许可是 Apache-2.0，没有同样的问题。
 
+下载的模型按引擎归入服务（需求 06 第 1 节"同一类能力的不同引擎各是一个服务"）：
+
+- 韩文和阿拉伯文只换识别模型，文字检测仍用 PP-OCRv6 small 的检测模型，与 6.3 节后台的做法相同。这两个识别模型下载后加入自带 OCR 服务的识别语言，服务随即重新登记（[服务协议](08-service-protocol.md) 第 12 节）。识别语言为自动时只用默认的 PP-OCRv6 small 识别模型；要识别韩文或阿拉伯文，用户在 OCR 节点上选定这种语言，服务按语言换用识别模型；
+- 竖排文字的 PP-OCRv5 模型和漫画 OCR 各是一项单独的 OCR 服务，检测和识别都用自己的模型，用户把 OCR 节点绑定到它们。
+
 阿拉伯文的识别结果要按 Unicode 双向算法从显示顺序转为逻辑顺序。RapidOCR 为此使用的 python-bidi 是 LGPL，不能在进程内使用；本项目用 unicode-bidi（MIT 或 Apache-2.0）。
 
 ### 6.3 后台
 
 后台的 OCR 服务与桌面端是同一份 Rust 实现，默认模型换成准确率更高的 PP-OCRv6 medium（检测 62 MB，识别 76.6 MB），韩文和阿拉伯文同样使用 PP-OCRv5 的识别模型。镜像同时提供 amd64 和 arm64 两种架构：ONNX Runtime 1.31.0 提供 Linux x86_64 和 aarch64 两种版本。
 
-PaddleOCR-VL-1.6（Apache-2.0）作为可选服务。它自带版面分析和阅读顺序，在技术报告的竖排文本类别中误差最低，适合双栏论文和复杂文档；代价是权重约 1.9 GB，吞吐要靠 GPU。
+PaddleOCR-VL-1.6（Apache-2.0）作为可选服务，放在编排文件的 `gpu` 配置组中（[部署与运维](14-deployment.md) 第 2 节）。它自带版面分析和阅读顺序，在技术报告的竖排文本类别中误差最低，适合双栏论文和复杂文档；代价是权重约 1.9 GB，吞吐要靠 GPU。
 
 ### 6.4 系统 OCR
 
-两个平台的系统 OCR 作为可选引擎，不占安装包体积：
+系统 OCR 不占安装包体积，首版只提供 Windows 的一种：
 
 - Windows.Media.Ocr：可用语言取决于用户安装的 OCR 语言包；微软官方示例的注释写明，竖排只支持繁体中文和日文；
-- Apple Vision：使用 macOS 15 起的 `RecognizeTextRequest`。官方文档没有竖排文字的说明，开发者论坛有竖排中文识别失败的报告。
+- Apple Vision：留到后续版本。`RecognizeTextRequest` 是 Swift 接口，首版的处理服务都是 Rust 程序（第 2 节），没有地方运行它。官方文档没有竖排文字的说明，开发者论坛有竖排中文识别失败的报告。
+
+Windows.Media.Ocr 是 WinRT 接口，Rust 经 windows-rs 可以直接调用，以 Rust 程序的本机进程运行，只在 Windows 上提供（需求 06 第 3.2 节）。
 
 ### 6.5 落选的引擎
 
@@ -229,7 +236,7 @@ Bergamot 依赖的句子切分库 ssplit-cpp 中有一个目录是 LGPL-2.1，�
 | Hy-MT2-1.8B，GGUF 格式 | Apache-2.0 | Q4_K_M 1.13 GB，Q8_0 1.91 GB | 五个方向都一步译出，不经英文 |
 | Hy-MT2-7B，GGUF 格式 | Apache-2.0 | Q4_K_M 4.62 GB | 有独立显卡或 Apple 芯片的电脑 |
 | Qwen3.5 小尺寸、Gemma 4 小尺寸 | Apache-2.0 | 按尺寸 | 需要上下文、术语或风格控制时作为 AI 翻译源 |
-| macOS 系统翻译 | 系统框架 | 由系统下载 | macOS 15 上只能经 SwiftUI 的 `translationTask` 取得翻译会话，macOS 26 起才能直接创建 |
+| macOS 系统翻译 | 系统框架 | 由系统下载 | 留到后续版本。macOS 15 上只能经 SwiftUI 的 `translationTask` 取得翻译会话，macOS 26 起才能直接创建；首版的翻译服务是不带界面的 Rust 程序，取不到会话（需求 07 第 1.2 节） |
 
 GGUF 是 llama.cpp 使用的模型文件格式，Q4_K_M、Q8_0 是它的量化等级，数字大致等于每个权重占用的位数。GGUF 模型由 llama.cpp（MIT）的 llama-server 以独立进程运行，翻译服务通过它的 HTTP 接口调用。
 
@@ -251,7 +258,7 @@ $$
 
 ### 7.3 后台
 
-后台的默认翻译服务是 llama.cpp 的 llama-server 加 Hy-MT2-1.8B；服务器有显卡时改用 Hy-MT2-7B。llama.cpp 的官方镜像同时提供 amd64 和 arm64，模型是 Apache-2.0，可以预置进镜像，镜像中附上模型的许可文件。
+后台的默认翻译服务是 llama.cpp 的 llama-server 加 Hy-MT2-1.8B。服务器有显卡、启用了 `gpu` 配置组时，另有 Hy-MT2-7B 在显卡上运行，作为另一项翻译服务登记（[部署与运维](14-deployment.md) 第 2 节）。llama.cpp 的官方镜像同时提供 amd64 和 arm64，模型是 Apache-2.0，可以预置进镜像，镜像中附上模型的许可文件。
 
 ### 7.4 落选的模型
 
@@ -275,6 +282,8 @@ $$
 ## 8 AI
 
 AI 对话、视觉 AI 和 AI 翻译源由同一个 AI 适配服务接入，它调用兼容 OpenAI 聊天补全接口的服务。外部的 AI 服务商、本机或后台运行的 llama-server、Ollama 都提供这种接口，一个适配服务就能覆盖。每个配置好的 AI 服务登记为一项服务（需求 06 第 1 节"同一类能力的不同引擎各是一个服务"），费用上限的计量也在适配服务中完成（[服务接口](09-service-interfaces.md) 第 14 节）。
+
+后台的 AI 服务在网页端配置，保存在工作流与配置存储，AI 适配服务启动时读取并订阅变化（[服务接口](09-service-interfaces.md) 第 20 节）；电脑上的 AI 服务在那台电脑的桌面端配置（需求 01 第 6 节）。
 
 ## 9 网页端
 
@@ -331,3 +340,7 @@ AI 对话、视觉 AI 和 AI 翻译源由同一个 AI 适配服务接入，它�
 | UI 自动化取词超时后返回的错误，以及合适的事务超时取值 | [桌面端](12-desktop.md) 3.5 |
 | 让 Chromium 系浏览器和 Electron 应用暴露选中文字的做法 | [桌面端](12-desktop.md) 4.5 |
 | Caddy 用 `shortlived` 配置申请 IP 地址证书的实际效果，这个选项在 Caddy 中仍标为实验性 | [部署与运维](14-deployment.md) 4.2 |
+| 经 Tauri 设置 `WS_EX_TOOLWINDOW` 的途径，以及在 tao 改写扩展样式后重新设置它的做法；用窗口子类化处理 `WM_MOUSEACTIVATE` 是否与 tao 的消息处理冲突 | 3.1、[桌面端](12-desktop.md) 3.3 |
+| 鼠标旁提示显示期间，临时把不带修饰键的 Esc 注册为全局快捷键（`RegisterHotKey`、`RegisterEventHotKey`），并监听全局鼠标按下，在两个平台上的效果 | [桌面端](12-desktop.md) 3.3、4.4 |
+| macOS 上让 llama-server 监听 0700 目录中的 Unix 域套接字（`--host` 取以 `.sock` 结尾的路径） | [安全](11-security.md) 第 5 节 |
+| llama.cpp 官方带 CUDA 的镜像、PaddleOCR-VL 的部署方式，以及它们提供的处理器架构 | 6.3、7.3、[部署与运维](14-deployment.md) 第 2 节 |

@@ -6,9 +6,11 @@ screen-translate-hub 是一个自部署的屏幕翻译与 AI 平台。Windows �
 
 ## 当前阶段
 
-项目处于规格说明（specification，下文简称 spec）阶段，仓库中只有文档，没有代码。需求文档已经确定，spec 的各份文档已经写出初稿，需要在原型阶段实测确认的事项列在 [技术选型](docs/spec/15-tech-selection.md) 第 13 节。
+项目处于规格说明（specification，下文简称 spec）阶段，仓库中只有文档，没有代码。需求文档已经确定，spec 的各份文档已经写出初稿，原型阶段要实测确认的技术事项列在 [技术选型](docs/spec/15-tech-selection.md) 第 13 节；参数的默认值、验收指标的合格线和默认快捷键列在 [待定事项](docs/requirements/open-questions.md) 第 2、3 节。
 
 ## 需求文档
+
+初次了解需求，先读 [使用场景](docs/requirements/08-scenarios.md)：它用五个具体场景说明平台在实际使用中的表现，每个场景都列出对应的需求和规格说明章节。
 
 | 文档 | 内容 |
 | --- | --- |
@@ -20,6 +22,7 @@ screen-translate-hub 是一个自部署的屏幕翻译与 AI 平台。Windows �
 | [账号、设备与共享](docs/requirements/05-accounts-devices-sharing.md) | 主人账号、登录与找回、电脑配对与撤销、服务开放、屏幕共享、来源与观看规则、安全与隐私 |
 | [服务拆分](docs/requirements/06-services.md) | 服务的分类、拆分原则、运行协调器、部署形式、注册与接口版本 |
 | [桌面平台](docs/requirements/07-desktop-platforms.md) | Windows 与 macOS 的最低版本、依赖的系统能力、系统权限、安装分发和平台差异 |
+| [使用场景](docs/requirements/08-scenarios.md) | 五个典型场景：用户的操作、平台的响应，以及对应的需求与规格说明章节 |
 | [待定事项](docs/requirements/open-questions.md) | 已识别但尚未确定的问题 |
 
 ## 规格说明

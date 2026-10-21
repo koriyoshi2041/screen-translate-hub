@@ -200,11 +200,21 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 
 | 文件 | 函数与类型 | 职责 |
 | --- | --- | --- |
-| `main.ts` | `main()` | 提供 `viewer.Publish`、`viewer.SetSharing`；启动局域网 HTTP 服务 |
-| `sources.ts` | `class SourceRegistry`：`publish(stream)`、`list()`、`subscribe(id, sink)` | [后台平台服务](10-backend.md) 5.1 至 5.3 的来源、快照和慢速观看端 |
-| `frames.ts` | `class FrameStore`：`put(id, image)`、`get(id, width, dataSaver)` | 按观看端宽度缩放并编码，同一宽度只编码一次 |
-| `http.ts` | `startHttp(opts)` | 网页、画面、浏览器 WebSocket；访问口令（需求 09 第 3.4 节） |
-| `web/` | 观看页 | 来源列表、画面与译文、显示设置；用 `@sth/render` 绘制 |
+| `main.ts` | 服务入口 | 本机端点提供 `viewer.Publish`、`viewer.SetSharing`、`viewer.SetAccessToken`；浏览器连接提供 `viewer.ListSources`、`viewer.Subscribe`；跟随 `agent.WatchSharing` |
+| `sources.ts` | `class SourceRegistry`：`add(start)`、`remove(src)`、`clear()`、`list()`、`watch(cb)`、`frame(id)`；`class Source`：`putFrame`、`setSnapshot`、`event`、`subscribe`、`close` | [后台平台服务](10-backend.md) 5.1 至 5.3 的来源与快照；每路来源保留最近 3 张批次画面 |
+| `frames.ts` | `class FrameStore`：`get(id, width, dataSaver, format)`、`drop(ids)` | 按观看端宽度缩放（按 64 像素取整，只缩小不放大）并编码，同一画面、宽度、质量只编码一次 |
+| `http.ts` | `startHttp(opts)` | 观看页、`GET /frame/{image_id}`、`/ws` 上的浏览器 WebSocket |
+| `web.ts` | `buildWeb()` | 服务启动时用 esbuild 在内存中打包观看页，发行版可以预先打包到 `web/dist` |
+| `web/` | 观看页 | 来源列表、画面与译文、段落面板、显示设置、列表布局；用 `@sth/render` 绘制 |
+
+第一版的做法：
+
+- **浏览器连接**：浏览器在 `/ws` 上讲同一套服务协议，握手的 `kind` 为 `browser`，出示访问码而不是本机会话令牌；升级请求必须带同源的 `Origin`，否则在握手前拒绝，防止别的网站借用户的浏览器连进来。同一地址连续 10 次访问码错误后锁定一分钟。浏览器只能调用 `ListSources` 和 `Subscribe`，`Publish` 等方法只在本机端点上提供；
+- **批次画面走 HTTP**：`GetFrame` 改为 `GET /frame/{image_id}?w=&saver=&accept=`，访问码放在 `Authorization: Bearer` 头里。浏览器解码图片用原生的 `fetch` 加 `createImageBitmap` 最直接，也省去把几百 KB 的图片拆进协议消息。语义与 [服务接口](09-service-interfaces.md) 第 19 节相同：宽度为 $\min(w, W)$，同一编码共用；
+- **质量的默认值**（[待定事项](../requirements/open-questions.md) 第 2 节）：WebP 质量 72，JPEG 78；省流模式宽度乘 0.6，WebP 45，JPEG 50；
+- **落后的订阅者**：`Stream.writable` 为假（额度用完）时记下落后、丢弃之后的事件，额度恢复后先发一份新快照（09 第 19 节）。观看页解码完一张画面才取下一条消息，所以手机慢时服务自然停下；
+- **访问码**：12 个字符，取自去掉了易混字符的 31 个字母和数字，约 60 位；放在链接的 `#k=` 后面，浏览器不会把它发给服务器，页面读到后存进本地存储并从地址栏去掉；
+- **列表布局**：整块桌面缩到手机宽度后字太小，观看页可以改成按阅读顺序列出译文（用归一化的 XY 切分对段落框排序），点一项展开原文。这是需求 01 第 5.4 节之外的补充，默认仍是画面加译文。
 
 ## 14 services/assistant
 

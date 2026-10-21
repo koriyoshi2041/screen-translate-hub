@@ -176,8 +176,19 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 | `claude-cli.ts` | `class ClaudeCliEngine` | 常驻一个 `claude -p --input-format stream-json --output-format stream-json` 进程，省去每次启动的开销；内置工具全部关闭 |
 | `openai.ts` | `class OpenAiEngine` | 兼容 OpenAI 聊天补全接口，支持流式 |
 | `anthropic.ts` | `class AnthropicEngine` | Anthropic Messages 接口，支持流式 |
-| `bergamot.ts` | `class BergamotEngine` | Bergamot WASM，经英文串联 |
+| `bergamot.ts` | `class BergamotEngine`：`create(config)`、`route(from, to)`、`prepare(from, to)`；`cjkPunctuation(text)` | Bergamot：Firefox 的翻译引擎和模型；没有直达模型时经英文转译 |
+| `bergamot/registry.ts` | `class ModelRegistry`：`records(collection)`、`file(record)`；`pickModelFiles()`、`pickWasm()`、`directions()`、`filterApplies()` | 从 Mozilla Remote Settings 选择并下载模型和引擎文件 |
+| `bergamot/worker.ts` | worker 线程 | 加载 WASM 引擎和模型，按批翻译 |
 | `mock.ts` | `class MockEngine` | 按脚本给出版本、完成标记、延迟和两类失败 |
+
+### 10.1 Bergamot
+
+- **文件来源**：与 Firefox 相同，读 Remote Settings 的 `translations-models` 和 `translations-wasm` 两个集合（`https://firefox.settings.services.mozilla.com/v1/buckets/main/collections/…/records`），附件从服务器声明的附件地址下载，按记录中的 SHA-256 校验，存在 `%APPDATA%\screen-translate-hub\bergamot`。记录列表缓存一天，离线时用旧缓存；
+- **选文件**：`filter_expression` 按桌面正式版评估（只出现过 `env.appinfo.OS`、`env.channel` 的比较）；跳过 `2.0a1` 这样的预发布版本；同一方向取版本最新、文件齐全（模型，词表或源、目标两个词表，可选的短名单）的一组；
+- **引擎**：Firefox 源码中的 Emscripten 胶水代码（mozilla/translations v0.6.0，MPL-2.0）原样放在 `services/translate/vendor/bergamot/`，配主版本 3 的 WASM。翻译是同步的、占 CPU，所以放在 worker 线程中，服务的事件循环和保活不受影响。模型配置与 Firefox 相同（beam 1、int8 矩阵乘、关闭质量模型）；
+- **语言**：清单中的源语言是有"X→英文"模型的语言加英文，目标语言是有"英文→X"模型的语言加英文；两种外语之间经英文转译（`translateViaPivoting`）。不自己判断源语言，由运行协调器的语言识别给出；
+- **第一次使用**：某个方向的文件不在本地时，后台开始下载，这一次请求以 `unavailable` 失败并带 30 秒的重试时间，运行协调器把它记为暂时不可用，其他翻译源照常（[运行协调器](04-run-coordinator.md) 6.3）。设置了目标语言时，服务启动就预先下载"英文→目标语言"；
+- **译文整理**：中文、日文模型常在汉字之间输出半角逗号、冒号等，替换为全角。
 
 ## 11 services/py/capture
 

@@ -100,3 +100,10 @@
 - Claude Code 大脑用真实的 haiku 测试（`tools/dev/try-assistant-brain.ts`）：第一轮调用 `get_context` 和 `annotate`，在给定的屏幕坐标画框，约 5 秒；第二轮记得第一轮指过的数字，约 3 秒；
 - 桌面上实测：经开发控制在卡片里提问，AI 截屏、OCR，在测试窗口的标题 "Signing in" 上画了箭头；
 - 发现并修正：会话开始后第一次心跳没有比较基准，被当作"整屏都变了"而多叫醒一次；AI 在调用工具前后的两段话在卡片里连成了一句；暂停期间心跳以外的叫醒（快捷键）仍会调用 AI。
+
+### Bergamot
+
+- npm 上的 `@browsermt/bergamot-translator` 停在 2022 年的 0.4.9，Firefox 现在的模型是 2.x 版本。改用 Firefox 自己的组合：Remote Settings 中的 WASM（3.0）加 Firefox 源码中对应的胶水代码（v0.6.0）。胶水代码在 Node 中给出 `wasmBinary` 就不读文件，可以直接在 worker 线程中运行；
+- 模型集合有 742 条记录、58 种语言，大多是与英文之间的方向；中文的模型用源、目标两个词表；
+- 实测（`tools/dev/try-bergamot.ts`）：英文→简体中文，下载加载约 2 秒（约 53 MB），4 段 110 毫秒；日文→简体中文经英文转译，2 段 96 毫秒；译文质量可用，但汉字之间常是半角标点，加了全角替换；
+- 与 Claude Code 竞速的截图翻译：Bergamot 的译文在请求后约 2.2 秒出现（含截屏和 OCR），Claude 的译文约 5.3 秒逐步替换，与 william 演示视频中的过程一致。

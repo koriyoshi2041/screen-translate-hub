@@ -38,6 +38,70 @@ function tokenMatches(expected: string, given: string | undefined): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+export interface HandshakeOptions {
+  /** The token the peer must present: the local session token, or a viewer access token. */
+  token: string;
+  onConnection: (conn: Connection, hello: HelloFrame) => void;
+  /** Called with the outcome of each handshake, e.g. to rate-limit failed attempts. */
+  onResult?: (ok: boolean) => void;
+}
+
+/** Server side of the handshake on an accepted socket (spec 08 section 3). */
+export function serverHandshake(ws: WebSocket, opts: HandshakeOptions): void {
+  let conn: Connection | null = null;
+  const timer = setTimeout(() => ws.close(1008, 'handshake timeout'), HANDSHAKE_TIMEOUT_MS);
+  ws.on('message', (data) => {
+    const bytes = toBytes(data);
+    if (conn) {
+      conn.receive(bytes);
+      return;
+    }
+    clearTimeout(timer);
+    let hello: HelloFrame;
+    try {
+      const f = decodeFrame(bytes);
+      if (f.t !== 'hello') throw new Error('expected hello');
+      hello = f;
+    } catch {
+      ws.close(1002, 'bad handshake');
+      return;
+    }
+    const reject = (ack: AckFrame) => {
+      ws.send(encodeFrame(ack));
+      ws.close(1008, ack.code);
+    };
+    if (!Array.isArray(hello.ver) || hello.ver[0] !== PROTOCOL_VERSION[0]) {
+      reject({ t: 'ack', ok: false, code: 'PROTOCOL_INCOMPATIBLE', reason: `server speaks ${PROTOCOL_VERSION.join('.')}` });
+      return;
+    }
+    if (!tokenMatches(opts.token, hello.token)) {
+      opts.onResult?.(false);
+      reject({ t: 'ack', ok: false, code: 'INVALID_CREDENTIAL' });
+      return;
+    }
+    opts.onResult?.(true);
+    ws.send(encodeFrame({ t: 'ack', ok: true }));
+    conn = new Connection({ send: (d) => ws.send(d), close: (c, r) => ws.close(c, r) }, false, {
+      kind: hello.kind,
+      name: hello.peer,
+    });
+    ws.on('close', () => conn?.lost('peer closed'));
+    opts.onConnection(conn, hello);
+  });
+  ws.on('error', () => conn?.lost('socket error'));
+  ws.on('close', () => clearTimeout(timer));
+}
+
+/** A WebSocket server without its own port, for upgrades on an existing HTTP server. */
+export function upgradeServer(): WebSocketServer {
+  return new WebSocketServer({
+    noServer: true,
+    maxPayload: MAX_PAYLOAD,
+    perMessageDeflate: false,
+    handleProtocols: (protocols) => (protocols.has(SUBPROTOCOL) ? SUBPROTOCOL : false),
+  });
+}
+
 export async function listen(opts: ListenOptions): Promise<WireServer> {
   const host = opts.host ?? '127.0.0.1';
   const wss = new WebSocketServer({
@@ -54,51 +118,12 @@ export async function listen(opts: ListenOptions): Promise<WireServer> {
   const port = (wss.address() as AddressInfo).port;
 
   wss.on('connection', (ws, req) => {
-    // Browsers never speak this protocol; refuse any request carrying an Origin.
+    // Browsers never speak to local endpoints; refuse any request carrying an Origin.
     if (req.headers.origin) {
       ws.close(1008, 'origin not allowed');
       return;
     }
-    let conn: Connection | null = null;
-    const timer = setTimeout(() => ws.close(1008, 'handshake timeout'), HANDSHAKE_TIMEOUT_MS);
-    ws.on('message', (data) => {
-      const bytes = toBytes(data);
-      if (conn) {
-        conn.receive(bytes);
-        return;
-      }
-      clearTimeout(timer);
-      let hello: HelloFrame;
-      try {
-        const f = decodeFrame(bytes);
-        if (f.t !== 'hello') throw new Error('expected hello');
-        hello = f;
-      } catch {
-        ws.close(1002, 'bad handshake');
-        return;
-      }
-      const reject = (ack: AckFrame) => {
-        ws.send(encodeFrame(ack));
-        ws.close(1008, ack.code);
-      };
-      if (!Array.isArray(hello.ver) || hello.ver[0] !== PROTOCOL_VERSION[0]) {
-        reject({ t: 'ack', ok: false, code: 'PROTOCOL_INCOMPATIBLE', reason: `server speaks ${PROTOCOL_VERSION.join('.')}` });
-        return;
-      }
-      if (!tokenMatches(opts.token, hello.token)) {
-        reject({ t: 'ack', ok: false, code: 'INVALID_CREDENTIAL' });
-        return;
-      }
-      ws.send(encodeFrame({ t: 'ack', ok: true }));
-      conn = new Connection({ send: (d) => ws.send(d), close: (c, r) => ws.close(c, r) }, false, {
-        kind: hello.kind,
-        name: hello.peer,
-      });
-      ws.on('close', () => conn?.lost('peer closed'));
-      opts.onConnection(conn, hello);
-    });
-    ws.on('error', () => conn?.lost('socket error'));
-    ws.on('close', () => clearTimeout(timer));
+    serverHandshake(ws, { token: opts.token, onConnection: opts.onConnection });
   });
 
   return {

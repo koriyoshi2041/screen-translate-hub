@@ -63,6 +63,16 @@ export class Stream<In = unknown, Out = unknown> implements AsyncIterable<In> {
     return Math.max(0, Math.floor(this.deadline - performance.now()));
   }
 
+  /** Whether `send` would go out now, without waiting for credit. */
+  get writable(): boolean {
+    return !this.finished && !this.localHalf && this.sendCredit > 0;
+  }
+
+  /** Resolves once a send would go out without waiting, or the stream has finished. */
+  async whenWritable(): Promise<void> {
+    while (!this.finished && this.sendCredit <= 0) await this.wait();
+  }
+
   async send(message: Out): Promise<void> {
     for (;;) {
       if (this.finished) throw RpcError.from(this.finished.code === 'ok' ? { code: 'cancelled' } : this.finished);

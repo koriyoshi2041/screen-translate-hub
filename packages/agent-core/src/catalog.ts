@@ -49,7 +49,7 @@ export function catalog(o: CatalogOptions): ServiceSpec[] {
     const { name, ...config } = t;
     specs.push({ name, command: node, args: ts('services/translate/src/main.ts'), cwd: o.root, config });
   }
-  if (o.viewer) specs.push({ name: 'viewer', command: node, args: ts('services/viewer/src/main.ts'), cwd: o.root, config: o.viewer });
-  if (o.assistant) specs.push({ name: 'assistant', command: node, args: ts('services/assistant/src/main.ts'), cwd: o.root, config: o.assistant });
+  if (o.viewer && existsSync(join(o.root, 'services/viewer/src/main.ts'))) specs.push({ name: 'viewer', command: node, args: ts('services/viewer/src/main.ts'), cwd: o.root, config: o.viewer });
+  if (o.assistant && existsSync(join(o.root, 'services/assistant/src/main.ts'))) specs.push({ name: 'assistant', command: node, args: ts('services/assistant/src/main.ts'), cwd: o.root, config: o.assistant });
   return specs;
 }

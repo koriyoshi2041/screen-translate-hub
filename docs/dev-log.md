@@ -1,0 +1,44 @@
+# 开发记录
+
+按时间记录第一版开发中的决定、实测结果和遇到的问题。结论性的内容同时写进需求或规格说明，本文只保留经过。
+
+## 2026-10-21
+
+### 需求梳理
+
+与委托方 william 的约定（10-18）：至少完成技术选型；spec 和 proposal 完善，关键处到函数级；架构多拆，流水线每个服务独立，考虑多进程和并发，不写大单体，按敏捷方式迭代。
+
+和执行人讨论后定下：
+
+- 先交最低要求（技术选型、spec），同时搭好模块化的大结构、留出接口，再争取把第一版跑起来；
+- 在现有需求和规格说明上补充，原有的大范围保留为长期目标，第一版的边界见 [第一版范围](requirements/09-v1-scope.md)；
+- 第一版只做 Windows，网页观看只做局域网；
+- 显示方式两种都做、可以切换：默认按 william 演示视频里的"画在原位"，另一种是原文档里的"整屏压暗 + 译文"和"截图浮卡"；
+- AI 助手按"平台把能力做成工具，pi 当大脑"的方向，门控用规则，给 jev 这类快速决策模型留接口，见 [AI 助手](spec/17-assistant.md)；
+- AI 翻译源：测试时用这台电脑上 Claude Code 的无头模式调用便宜的模型，同时保留兼容 OpenAI 的接口和 Anthropic 接口；
+- proposal 等这些做完再整理，过程先记在本文。
+
+### william 旧版软件的行为（演示视频截帧）
+
+- 快捷键（视频中为 Shift + Alt）后在屏幕上框选一块区域；
+- 框内每个段落盖上一块深灰色半透明圆角底，上面是白色译文，位置和大小贴着原段落；框外不处理；
+- 同一段先出现直译质量的机翻，随后被质量更好的 AI 译文替换，即竞速；
+- 页面滚动后，译文停在原来的位置，与画面错开。
+
+### 环境
+
+- 这台电脑：Windows 11 专业版 26200，Ryzen 7 8745H（8 核 16 线程），32 GB 内存，Radeon 780M 核显，没有 CUDA。显示器是远程软件的虚拟显示器，1366×768；
+- 开发经 SSH 进行，SSH 进程在会话 0，看不到桌面。需要在桌面上运行和截图时，用 `tools/win/run-in-desktop.ps1` 经计划任务把命令投送到登录着的控制台会话；
+- 新装：Python 3.12.10、VC++ 运行库（pyclipper 依赖 msvcp140.dll，缺它时 RapidOCR 导入失败）；已有 Node 24.20、npm 11.19、git、gh、Claude Code 2.1.304。
+
+### 可行性实测
+
+| 项目 | 结果 |
+| --- | --- |
+| windows-capture 2.0.1 采集整屏，不含鼠标指针、不画黄框 | 可用，第一帧 150～230 ms，BGRA |
+| RapidOCR 3.10（默认 PP-OCRv6 small，onnxruntime 1.31 CPU）识别整屏 1366×768 | 约 0.8 s，中英文结果正确 |
+| `claude -p --model haiku --tools "" --json-schema …` 翻译两段英文 | 约 4 s（其中接口约 2 s），约 0.0025 美元，结构化输出正确；sonnet 约 0.048 美元 |
+| Electron `setContentProtection(true)` | 在 Windows 上就是 `WDA_EXCLUDEFROMCAPTURE`（Electron PR #24274） |
+| Chromium 系的屏幕采集能否去掉鼠标指针 | 不能，所以采集用原生的 Windows.Graphics.Capture |
+| pi | `@earendil-works/pi-coding-agent` 1.3.0，MIT；Node SDK `createAgentSession`，自定义工具经扩展的 `pi.registerTool` 注册，`tools: []` 关闭内置工具 |
+| jev | TypeSafe AI 的 "System One" 模型，2026-09 发布：输入文本状态和若干有类型的问题，返回带置信度的结构化判断，70～500 ms，不生成文字，不收图片 |

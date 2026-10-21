@@ -9,6 +9,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import { join, resolve } from 'node:path';
+import { AssistantCard } from './assistant-card.ts';
 import { CardService } from './card.ts';
 import { OverlayManager, type WindowEnv } from './overlay.ts';
 import { selectRegion, type PhysicalRect } from './select.ts';
@@ -32,6 +33,7 @@ let agent: AgentCore;
 let launcher: RunLauncher;
 let overlay: OverlayManager;
 let cards: CardService;
+let assistant: AssistantCard;
 let tray: Tray | null = null;
 let continuous: RunHandle | null = null;
 let settingsWin: BrowserWindow | null = null;
@@ -63,6 +65,7 @@ function defineServices(s: Settings): void {
     translators: s.translators,
     excludePids: [process.pid],
     viewer: s.viewer.enabled ? { port: s.viewer.port, host: s.viewer.host, access_token: s.viewer.access_token } : undefined,
+    assistant: { ...s.assistant, own_pids: [process.pid], data_dir: store.dir },
   });
   for (const spec of specs) agent.define(spec);
 }
@@ -74,10 +77,15 @@ function prewarm(): void {
   for (const n of names) void agent.waitFor(n).catch((e) => console.error(`prewarm ${n}:`, e.message));
 }
 
-async function capturePeer(): Promise<Peer> {
-  const reg = await agent.waitFor('capture');
+/** A direct connection to a local service, started if needed. */
+async function servicePeer(name: string): Promise<Peer> {
+  const reg = await agent.waitFor(name);
   const conn = await connect(reg.endpoint, { token: agent.token, peer: 'agent' });
   return new Peer(conn, reg.manifest.name);
+}
+
+function capturePeer(): Promise<Peer> {
+  return servicePeer('capture');
 }
 
 async function grab(target: Record<string, unknown>): Promise<Image> {
@@ -191,6 +199,8 @@ function refreshTray(): void {
       { type: 'separator' },
       { label: 'Show translations', type: 'checkbox', checked: true, click: () => overlay.toggleVisible() },
       { label: 'Interactive overlay', type: 'checkbox', checked: false, click: () => overlay.toggleInteractive() },
+      { label: `AI assistant\t${s.hotkeys.assistant}`, click: () => void assistant.summon() },
+      { type: 'separator' },
       { label: 'Share to LAN viewers', type: 'checkbox', checked: s.sharing, click: (i) => setSharing(i.checked) },
       ...(s.viewer.enabled
         ? [
@@ -223,6 +233,7 @@ function registerHotkeys(): void {
   bind(h.continuous, () => void toggleContinuous());
   bind(h.overlay, () => overlay.toggleVisible());
   bind(h.interactive, () => overlay.toggleInteractive());
+  bind(h.assistant, () => void assistant.summon());
 }
 
 function openSettings(): void {
@@ -244,13 +255,14 @@ function openSettings(): void {
 ipcMain.handle('sth', async (_e, msg: { kind: string; patch?: Patch<Settings> }) => {
   if (msg.kind === 'get-settings') return store.value;
   if (msg.kind === 'save-settings' && msg.patch) {
-    const before = JSON.stringify(store.value.translators) + JSON.stringify(store.value.viewer);
+    const services = () => JSON.stringify([store.value.translators, store.value.viewer, store.value.assistant]);
+    const before = services();
     store.update(msg.patch);
     overlay.applySettings(store.value.display);
     registerHotkeys();
     refreshTray();
-    if (JSON.stringify(store.value.translators) + JSON.stringify(store.value.viewer) !== before) {
-      // translators or viewer changed: redefine and restart those services
+    if (services() !== before) {
+      // translators, viewer or assistant changed: redefine and restart the services
       agent.supervisor.stopAll();
       defineServices(store.value);
       prewarm();
@@ -324,6 +336,14 @@ function startDevControl(): void {
             });
           }
           out = { pages };
+        } else if (a.action === 'assistant') {
+          if (a.text) await assistant.ask(String(a.text));
+          else await assistant.summon();
+        } else if (a.action === 'assistant-stop') {
+          assistant.close();
+        } else if (a.action === 'assistant-card') {
+          const w = assistant.window();
+          out = w ? await w.webContents.executeJavaScript(`({ state: document.getElementById('state').textContent, status: document.getElementById('status').textContent, log: document.getElementById('log').innerText })`) : null;
         } else if (a.action === 'sharing') {
           setSharing(a.on === true);
         } else if (a.action === 'viewer-link') {
@@ -380,6 +400,7 @@ void app.whenReady().then(async () => {
   defineServices(store.value);
   overlay = new OverlayManager(env);
   cards = new CardService(env, () => store.value.display.screenshot_placement);
+  assistant = new AssistantCard(env, () => servicePeer('assistant'), () => store.value.assistant);
   agent.provide('overlay', 'overlay', { Attach: overlay.attach, Annotate: overlay.annotate });
   agent.provide('card', 'card', { Open: cards.open });
   await agent.start();

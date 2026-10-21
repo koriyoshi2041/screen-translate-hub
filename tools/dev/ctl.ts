@@ -3,7 +3,7 @@
 //   node tools/dev/ctl.ts screenshot 100 100 800 400
 //   node tools/dev/ctl.ts continuous-start [display|follow_active_window|window_under_cursor]
 //   node tools/dev/ctl.ts continuous-stop | details | dismiss | overlay-shots
-//   node tools/dev/ctl.ts settings '{"display":{"mode":"dim"}}'
+//   node tools/dev/ctl.ts settings '{"display":{"mode":"dim"}}'   (or @patch.json from PowerShell)
 //   node tools/dev/ctl.ts overlay-eval "document.body.innerHTML.length" [host index]
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,9 +15,12 @@ if (action === 'screenshot') {
   const [x, y, w, h] = rest.map(Number);
   body.rect = { x, y, w, h };
 } else if (action === 'continuous-start') body.mode = rest[0] ?? 'display';
-else if (action === 'settings') body.patch = JSON.parse(rest[0]);
+// '@file' reads the argument from a file (Windows PowerShell 5.1 strips quotes inside arguments)
+const dropBom = (s: string) => (s.charCodeAt(0) === 0xfeff ? s.slice(1) : s);
+const arg = (s: string) => (s.startsWith('@') ? dropBom(readFileSync(s.slice(1), 'utf8')) : s);
+if (action === 'settings') body.patch = JSON.parse(arg(rest[0]));
 else if (action === 'overlay-eval') {
-  body.js = rest[0].startsWith('@') ? readFileSync(rest[0].slice(1), 'utf8') : rest[0];
+  body.js = arg(rest[0]);
   body.index = Number(rest[1] ?? 0);
 }
 

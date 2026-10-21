@@ -5,6 +5,7 @@
     "packages/*/test/**/*.ts",
     "services/*/src/**/*.ts",
     "services/*/test/**/*.ts",
+    "services/*/web/**/*.ts",
     "apps/*/src/**/*.ts",
     "tools/dev/**/*.ts"
   ],

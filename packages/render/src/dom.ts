@@ -121,6 +121,9 @@ export class DomRenderer {
         d.style.cssText = `position:absolute;left:${box.x}px;top:${box.y}px;width:14px;height:14px;border-radius:7px;background:#d33;color:#fff;font:bold 11px sans-serif;text-align:center;line-height:14px;`;
         d.textContent = '!';
         d.title = shown.error_reason ?? 'translation failed';
+        d.dataset.source = p.add.text;
+        d.dataset.full = '';
+        d.dataset.error = d.title;
         return;
       }
       const text = shown.text ?? '';
@@ -168,6 +171,7 @@ export class DomRenderer {
       d.title = '';
       d.dataset.full = text;
       d.dataset.source = p.add.text;
+      delete d.dataset.error;
     });
     for (const [key, d] of this.nodes) {
       if (!keep.has(key)) {
@@ -177,11 +181,11 @@ export class DomRenderer {
     }
   }
 
-  /** The paragraph under a point (interactive mode), with its original and full translation. */
-  hit(x: number, y: number): { source: string; translation: string } | null {
+  /** The paragraph under a point (client coordinates), with its original, full translation or failure reason. */
+  hit(x: number, y: number): { source: string; translation: string; error?: string } | null {
     for (const d of this.nodes.values()) {
       const r = d.getBoundingClientRect();
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return { source: d.dataset.source ?? '', translation: d.dataset.full ?? '' };
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return { source: d.dataset.source ?? '', translation: d.dataset.full ?? '', error: d.dataset.error };
     }
     return null;
   }

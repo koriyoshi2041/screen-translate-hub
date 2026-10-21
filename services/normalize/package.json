@@ -1,0 +1,17 @@
+{
+  "name": "@sth/normalize",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/normalize.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "@sth/model": "*",
+    "@sth/service-kit": "*",
+    "@sth/wire": "*"
+  }
+}

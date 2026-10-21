@@ -72,6 +72,13 @@ export function coordinatorHost(name: string, clients: Clients): ServiceHost {
       const run = runs.get(req.run_id);
       await stream.send({ events: run ? run.details.list({ kind: req.kind }) : [], state: run?.state ?? 'unknown' });
     },
+    /** The display state of a run, by default the newest active continuous run (for the AI assistant). */
+    async GetDisplay(stream) {
+      const req = ((await stream.recv()) ?? {}) as { run_id?: string };
+      const active = (r: Run) => r.state === 'running' || r.state === 'paused';
+      const run = req.run_id ? runs.get(req.run_id) : [...runs.values()].reverse().find((r) => active(r) && r.plan?.entry === 'continuous');
+      await stream.send({ run_id: run?.id ?? null, state: run?.state ?? null, snapshot: run?.displaySnapshot() ?? null });
+    },
   });
 }
 

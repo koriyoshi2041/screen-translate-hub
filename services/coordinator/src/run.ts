@@ -6,6 +6,7 @@ import {
   toRelativeRect,
   type CaptureGeometry,
   type CaptureRange,
+  type DisplaySnapshot,
   type EndState,
   type Image,
   type OcrResult,
@@ -127,6 +128,13 @@ export class Run implements RaceSink {
     this.clients = clients;
     this.hooks = hooks;
     this.shared = shared;
+  }
+
+  /** The overlay display state of this run, for the assistant's translation_state tool (spec 17 section 6). */
+  displaySnapshot(): DisplaySnapshot | null {
+    if (!this.hub) return null;
+    const s = this.hub.byType('overlay')[0] ?? this.hub.streams[0];
+    return s ? s.snapshot() : null;
   }
 
   private setState(s: RunStatusName, reason?: string): void {

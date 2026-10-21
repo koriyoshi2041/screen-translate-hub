@@ -8,7 +8,7 @@
 
 | 部分 | 语言与主要依赖 | 理由 |
 | --- | --- | --- |
-| 桌面主程序：托盘、快捷键、框选、覆盖层、浮卡、AI 卡片、服务监管 | TypeScript，Electron；Win32 接口经 koffi 调用 | 透明、点击穿透、置顶、不激活、排除截屏（`setContentProtection` 即 `WDA_EXCLUDEFROMCAPTURE`）都有现成接口；不需要本机编译器；界面与网页观看端共用排版代码 |
+| 桌面主程序：托盘、快捷键、框选、覆盖层、浮卡、AI 卡片、服务监管 | TypeScript，Electron；Win32 接口经 koffi 调用 | 窗口、托盘、快捷键、设置页现成；不需要本机编译器；界面与网页观看端共用排版代码。覆盖层不用 Electron 的透明窗口（没有 GPU 合成时不显示，见第 15.1 节），改为离屏渲染的页面加原生分层窗口 |
 | 屏幕采集与变化检测 | Python 3.12，windows-capture（Windows.Graphics.Capture），numpy | 能关闭鼠标指针和采集黄框；Chromium 系的采集做不到不带指针；numpy 做逐像素比对足够快 |
 | OCR | Python，RapidOCR 3.10（PP-OCRv6 small），onnxruntime | 实测整屏约 0.8 秒；检测后处理和模型都现成 |
 | 运行协调器、归一化、翻译适配、局域网观看、AI 助手 | TypeScript，Node 24 | 竞速、复用和生命周期是事件驱动的状态机，适合单线程事件循环；pi 是 TypeScript 写的；Bergamot 有 WASM 版本 |
@@ -34,7 +34,7 @@
 
 主程序是服务清单和监管者（[架构](01-architecture.md) 2.1）：按需启动服务进程，崩溃后按退避间隔重启。系统集成服务都在主程序进程内，与 [桌面端](12-desktop.md) 1.1 一致；屏幕采集是例外，它在单独的 Python 进程中运行。Windows 的屏幕采集不需要系统授权，`WDA_EXCLUDEFROMCAPTURE` 对所有采集方生效，单独成进程不影响权限归属和自身窗口的排除，[桌面端](12-desktop.md) 1.1 的理由只对 macOS 成立。
 
-没有图形界面时（例如经 SSH 运行测试），主程序的核心以无界面方式运行：`tools/dev/agent-headless.ts` 加载同一套服务清单和监管逻辑，用回放采集代替屏幕采集，用记录显示端代替覆盖层（[验收与测试](16-acceptance.md) 第 2 节）。
+没有图形界面时（例如经 SSH 运行测试），主程序的核心以无界面方式运行：主程序核心在 `packages/agent-core`，与 Electron 无关，`tools/dev/e2e.ts` 加载同一套服务清单和监管逻辑，用回放采集代替屏幕采集，用记录显示端代替覆盖层（[验收与测试](16-acceptance.md) 第 2 节）。
 
 ### 2.1 启动与登记
 
@@ -79,6 +79,7 @@ packages/
   render/                    显示状态机、译文排版、DOM 绘制（TS，覆盖层、浮卡、网页共用）
   workflow/                  工作流文档、静态校验、默认模板（TS）
   service-kit/               服务进程的公共启动代码：读启动信息、登记、日志（TS）
+  agent-core/                主程序核心：服务清单、监管、agent 接口、发起运行（TS，与 Electron 无关）
 services/
   coordinator/               运行协调器（TS）
   normalize/                 归一化（TS）
@@ -122,16 +123,16 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 | --- | --- |
 | `types.ts` | [数据模型](02-data-model.md) 全部类型：`Rect`、`RectF`、`Quad`、`CaptureGeometry`、`EncodedImage`、`Image`、`TextBlock`、`OcrRegion`、`OcrResult`、`Unit`、`ReuseRef`、`Candidate`、`RaceRecord`、`SourceOutcome`、`ChangeMap`、`DisplayEvent`、`DisplaySnapshot`、`ParagraphView`、`Notice`、`Annotation` |
 | `geometry.ts` | `quadBounds(q): RectF`；`pxRect(q, W, H): Rect`（数据模型 1.2 的 $\operatorname{px}$）；`orderQuad(points): Quad`（数据模型 1.2 的点序）；`iou(a, b)`；`rectUnion`、`rectIntersect`、`expandRect`、`clipRect`；`toRelative(q, W, H)` |
-| `lang.ts` | `normalizeTag(t)`；`supports(declared: string[], tag): boolean`（[总览](00-overview.md) 3.5 的查找规则）；`sameBaseLanguage(a, b): boolean`（需求 09 第 3.2 节） |
-| `text.ts` | `cacheKey(u: string): string`（数据模型第 8 节的 $\kappa$）；`isCjk(ch)`、`scriptOf(ch)` |
+| `lang.ts` | `normalizeTag(t)`；`supports(declared: string[], tag): boolean`（[总览](00-overview.md) 3.5 的查找规则）；`sameLanguage(a, b): boolean`（需求 09 第 3.2 节） |
+| `text.ts` | `cacheKey(u: string): string`（数据模型第 8 节的 $\kappa$）；`hasWords(text)`（需求 09 第 3.2 节的"没有可译的词"）；`isCjk(ch)`、`scriptOf(ch)`、`scriptHistogram(text)` |
 
 ## 7 packages/render
 
 | 文件 | 函数与类型 | 职责 |
 | --- | --- | --- |
 | `state.ts` | `interface DisplayState`；`emptyState()`；`applyEvent(s, ev): ApplyResult`（序号连续时更新，不连续时返回 `gap`）；`fromSnapshot(snap)`；`toSnapshot(s)` | [显示与排版](07-display.md) 第 1 节的显示状态；运行协调器用同一份代码生成快照，保证"快照等于事件依次作用的结果" |
-| `layout.ts` | `fitText(text, box, opts, measure): FitResult`；`expandBox(box, others, frame, dir)` | 07 第 5.3、5.4 节：二分查找字号、占用相邻空白、截断 |
-| `dom.ts` | `class DomRenderer`：`constructor(root, settings)`、`setMode(mode)`、`render(state, frameSize, viewSize, mapping)` | 原位底板和整屏压暗两种显示方式（需求 09 第 3.1 节） |
+| `layout.ts` | `fitText(input): FitResult`；`wrap(text, px, width, measure)`；`breakPieces(text)`；`expandBox(box, input, gap)` | 07 第 5.3、5.4 节：二分查找字号、占用相邻空白、截断；换行按简化的 UAX #14，中日文避头尾（闭合标点不放行首，开引号不放行尾） |
+| `dom.ts` | `class DomRenderer`：`constructor(root, settings)`、`setSettings(s)`、`render(state, {width, height, targetLanguage})`、`hit(x, y)` | 原位底板和整屏压暗两种显示方式（需求 09 第 3.1 节）；根元素按视图尺寸定宽高；译文与原文只差空白时不画；`hit` 供交互模式取悬停段落的原文和译文 |
 | `annotations.ts` | `class AnnotationLayer`：`set(items)`、`clear(ids?)`、`render(viewMapping)` | [AI 助手](17-assistant.md) 第 7 节的屏幕标注 |
 | `settings.ts` | `interface DisplaySettings`；`defaultSettings(kind)` | 07 第 6 节，加上显示方式和底板不透明度 |
 
@@ -222,21 +223,46 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 
 | 文件 | 函数与类型 | 职责 |
 | --- | --- | --- |
-| `main/main.ts` | 应用入口 | 单实例、托盘、设置、启动主程序核心 |
-| `main/agent.ts` | `class AgentCore`：`start()`、`stop()`；`agent` 接口的 `Register`、`ListServices`、`Acquire`、`Notify`、`SaveHistory` | 服务清单与转发（[服务接口](09-service-interfaces.md) 第 3 节） |
-| `main/supervisor.ts` | `class Supervisor`：`define(spec)`、`ensure(name)`、`stop(name)`、`stopAll()` | 按需启动、退避重启、空闲回收 |
-| `main/settings.ts` | `loadSettings()`、`saveSettings(s)` | 设置文件，位于 `%APPDATA%\screen-translate-hub` |
-| `main/entries.ts` | `startScreenshot()`、`toggleContinuous()`、`toggleOverlay()`、`toggleInteractive()`、`focusAssistant()` | 入口：按绑定的工作流发起运行 |
-| `main/hotkeys.ts` | `registerHotkeys(map, handlers)` | 全局快捷键 |
-| `main/win32.ts` | `getWindowRect(hwnd)`、`getForegroundWindow()`、`setWindowPosAfter(hwnd, after)`、`watchWinEvents(cb)`、`setToolWindow(hwnd)`、`excludeFromCapture(hwnd)` | koffi 调用 user32、dwmapi |
-| `main/overlay.ts` | `class OverlayService`：`overlay.Attach`、`overlay.Annotate` | 覆盖层窗口：透明、点击穿透、不激活、排除截屏；跟随窗口 |
-| `main/region-select.ts` | `selectRegion(): Promise<Rect \| null>` | 框选界面 |
-| `main/card.ts` | `class CardService`：`card.Open` | 截图结果：画在原位或截图浮卡 |
-| `main/assistant-card.ts` | `class AssistantCard` | AI 悬浮卡片 |
-| `renderer/*` | 各窗口的页面 | 覆盖层、浮卡、AI 卡片、框选、设置 |
+主程序核心在 `packages/agent-core`：
+
+| 文件 | 函数与类型 | 职责 |
+| --- | --- | --- |
+| `agent.ts` | `class AgentCore`：`start()`、`provide(svc, iface, methods)`、`alias(name, target)`、`waitFor(name)`、`setSharing(on)`；`agent` 接口的 `Register`、`ListServices`、`Acquire`、`WatchSharing`、`Notify`、`SaveHistory` | 服务清单与转发（[服务接口](09-service-interfaces.md) 第 3 节） |
+| `supervisor.ts` | `class Supervisor`：`define(spec)`、`ensure(name)`、`stop(name)`、`stopAll()` | 按需启动（经标准输入传启动信息）、退避重启、连续崩溃 5 次后放弃；每个服务一个日志文件 |
+| `catalog.ts` | `catalog(opts): ServiceSpec[]` | 第一版的服务清单 |
+| `runs.ts` | `class RunLauncher`：`start(doc, trigger): RunHandle`、`details(runId)` | 按工作流发起运行，跟踪状态，转发暂停、继续、停止和人工重试 |
+| `recording.ts` | `class RecordingDisplays` | 无界面运行时代替覆盖层和浮卡，记录收到的显示事件 |
+
+Electron 部分在 `apps/desktop/src`：
+
+| 文件 | 函数与类型 | 职责 |
+| --- | --- | --- |
+| `main/main.ts` | 应用入口 | 单实例、托盘、设置、服务定义、入口（截图、持续翻译、显隐、交互模式）、全局快捷键、开发控制端口 |
+| `main/settings.ts` | `class SettingsStore`：`update(patch)`；`workflows(settings)` | 设置文件位于 `%APPDATA%\screen-translate-hub`，补丁按嵌套对象合并；从设置生成两个入口的工作流（翻译源顺序即名次） |
+| `main/layered.ts` | `class LayeredSurface`：`update(bgra, w, h)`、`setBounds(b)`、`show()`、`hide()`、`setClickThrough(on)`、`destroy()` | 原生分层窗口，见第 15.1 节 |
+| `main/host.ts` | `class OverlayHost`：`send(msg)`、`setBounds(b)`、`show()`、`hide()`、`eval(js)`、`frame()`、`close()` | 离屏渲染的页面加一个分层窗口；覆盖层、原位截图结果、AI 标注共用 |
+| `main/overlay.ts` | `class OverlayManager`：`overlay.Attach`、`overlay.Annotate`、`toggleVisible()`、`toggleInteractive()`、`applySettings(s)` | 覆盖层：每 60 ms 跟随采集范围或被采集的窗口，窗口最小化时隐藏；交互模式下轮询指针，悬停显示原文，单击复制 |
+| `main/select.ts` | `selectRegion(env, grab): Promise<Selection \| null>`；`cropImage(img, rect)` | 框选：先截整屏，在不透明全屏窗口中显示冻结的画面，结果从这张截图裁出 |
+| `main/card.ts` | `class CardService`：`card.Open`、`dismissInPlace()` | 截图结果：画在原位（Esc 关闭）或截图浮卡 |
+| `main/win32.ts` | `windowFrame(hwnd)`、`isWindow`、`isMinimized`、`foregroundWindow()`、`topWindowAt(x, y)`、`placeAbove(hwnd, target)`、`cursorPos()`、`leftButtonDown()`、`windowInfo(hwnd)` | koffi 调用 user32、dwmapi |
+| `renderer/*` | 各窗口的页面 | 覆盖层、原位结果、浮卡、AI 标注、框选、设置 |
+
+### 15.1 覆盖层的绘制与层级
+
+Chromium 的透明窗口依赖 GPU 合成。远程桌面、虚拟显示器和部分驱动下只有软件合成，透明窗口完全不显示，开发机就是这种情况（[开发记录](../dev-log.md)）。第一版的覆盖层因此不用透明的 `BrowserWindow`：
+
+1. 页面在离屏的 `BrowserWindow` 中渲染（`webPreferences.offscreen`，每秒最多 30 帧），每次 `paint` 事件给出整页的预乘 BGRA 位图；
+2. 位图复制进一个 DIB，用 `UpdateLayeredWindow`（`ULW_ALPHA`）推给一个原生弹出窗口，扩展样式为 `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`，不需要 GPU；
+3. `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` 排除采集；交互模式去掉 `WS_EX_TRANSPARENT`；
+4. 离屏页面创建时尺寸被限制在工作区内，加载后重新设置内容尺寸；覆盖整块显示器的窗口少一像素高，否则系统把它当作全屏程序，把任务栏压到其他窗口下面。
+
+跟随窗口时覆盖层不置顶，每次跟随检查都把它放到目标窗口正上方（`placeAbove`）。后台进程调用 `SetWindowPos(HWND_TOP)` 返回成功却不生效，能做的只有"插到某个窗口之后"和"自己的窗口置顶、取消置顶"；插到置顶窗口之后又会让窗口变成置顶，盖住无关的对话框。所以：目标窗口上方是置顶窗口（目标在普通层最上）时，先置顶再 `HWND_NOTOPMOST`，落在普通层最上；否则插在目标上方那个窗口之后。
 
 ## 16 开发与测试
 
-- 单元测试：`npm test` 运行全部 TS 包的 `node:test`，`python -m unittest` 运行 Python 包；
-- 端到端（无界面）：`tools/dev/e2e-*.ts` 启动无界面主程序，用回放采集和模拟翻译源跑通单次截图和持续屏幕，比较记录显示端收到的事件（[验收与测试](16-acceptance.md) 第 2、4 节）；
-- 桌面实测：经 SSH 开发时，用 `tools/win/run-in-desktop.ps1` 在桌面会话中启动主程序；设置 `STH_DEBUG_CAPTURABLE=1` 时平台窗口不排除在采集之外，以便截图检查覆盖层的绘制。
+- 单元测试：`npm test` 运行全部 TS 包的 `node:test`，`npm run test:py` 运行 Python 包；
+- 端到端（无界面）：`tools/dev/e2e.ts` 启动无界面主程序，用回放采集和模拟翻译源跑通单次截图和持续屏幕，比较记录显示端收到的事件（[验收与测试](16-acceptance.md) 第 2、4 节）；
+- 桌面实测：经 SSH 开发时，`tools/win/desktop.ps1 restart` 构建并经计划任务在桌面会话中启动主程序（`run-in-desktop.ps1`），带 `--dev-control` 打开本机控制端口；`-Capturable` 加 `--debug-capturable`，平台窗口不排除在采集之外，用于看真实层级；
+- 开发控制：`tools/dev/ctl.ts` 发起截图翻译、开始和停止持续翻译、改设置、取运行详情，`desktop-shot` 经采集服务截整屏，`overlay-shots` 取各浮层页面最后渲染的一帧，`overlay-eval` 在浮层页面里执行脚本，`win-info` 给出浮层、前台窗口和指针下的窗口；`compose.ts` 把浮层帧合成到桌面截图上；
+- 版式问题：`ocr-dump.py` 对截图做 OCR，`norm-dump.ts` 打印归一化得到的段落；
+- 可控的测试窗口：`tools/dev/stage.py` 显示一篇英文文章，经控制文件滚动、改写段落、移动窗口；`tools/win/set-cursor.py` 移动指针，`zorder.py` 打印窗口层级；`details-summary.ts` 按批次汇总运行详情。

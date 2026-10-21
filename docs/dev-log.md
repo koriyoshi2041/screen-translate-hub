@@ -92,3 +92,11 @@
 - 整块 1366 像素宽的桌面缩到手机的 412 像素后，译文字号被压到最小字号，长段落只能截断。加了"列表"布局；
 - 开发机上第一次启动时观看服务按默认值监听所有网络，Windows 防火墙弹出了是否允许 Node.js 的询问。这是用户的安全决定，没有替用户选择，询问框留在桌面上；之后的测试把观看服务改为只监听本机；
 - Electron 在 Windows 上遇到形如网址的命令行参数会直接退出（退出码 -1，没有任何输出），截网页的工具改为从环境变量读网址。
+
+### AI 助手
+
+- pi 1.3.0 的 SDK 用 `createAgentSession` 的 `tools`（白名单）加 `customTools` 接入平台工具，比扩展的 `registerTool` 更直接；没有 API 密钥也能测：测试里起一个按脚本回答的 OpenAI 兼容服务，pi 先调用工具、再流式回答，确认 pi 只看到平台工具（`services/assistant/test/brain-pi.test.ts`）；
+- jev 的实际接口与早先记下的不同：`@typesafe-ai/sdk` 的 `systemOne({state, questions})`，是非题（`noul`）只返回概率，没有置信度。改为同时问一个选择题，用它的置信度决定是否采信；
+- Claude Code 大脑用真实的 haiku 测试（`tools/dev/try-assistant-brain.ts`）：第一轮调用 `get_context` 和 `annotate`，在给定的屏幕坐标画框，约 5 秒；第二轮记得第一轮指过的数字，约 3 秒；
+- 桌面上实测：经开发控制在卡片里提问，AI 截屏、OCR，在测试窗口的标题 "Signing in" 上画了箭头；
+- 发现并修正：会话开始后第一次心跳没有比较基准，被当作"整屏都变了"而多叫醒一次；AI 在调用工具前后的两段话在卡片里连成了一句；暂停期间心跳以外的叫醒（快捷键）仍会调用 AI。

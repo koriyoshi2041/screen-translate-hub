@@ -220,14 +220,18 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 
 | 文件 | 函数与类型 | 职责 |
 | --- | --- | --- |
-| `main.ts` | `main()` | 提供 `assistant.Session`、`assistant.Tools` |
-| `session.ts` | `class AssistantSession`：`start(opts)`、`userMessage(text)`、`pause()`、`resume()`、`stop()` | [AI 助手](17-assistant.md) 第 2 节；叫醒的合并与排队 |
-| `heartbeat.ts` | `class Heartbeat`：`start()`、`stop()`、`onSample(cb)` | 17 第 3 节 |
-| `gate.ts` | `class RuleGate`、`class JevGate`、`class CompositeGate` | 17 第 4 节 |
-| `tools.ts` | `platformTools(deps): PlatformTool[]` | 17 第 6 节，一份定义，供 pi 和 MCP 共用 |
-| `brain-pi.ts` | `class PiBrain` | 17 第 5.2 节 |
-| `brain-claude.ts` | `class ClaudeCodeBrain` | 17 第 5.2 节 |
-| `mcp.ts` | `runMcpStdio(tools)` | 供 Claude Code 使用的 MCP 服务器 |
+| `main.ts` | 服务入口 | 提供 `assistant.Session`、`assistant.Tools`，以及给 MCP 代理的 `ListSessionTools`、`CallTool` |
+| `session.ts` | `class AssistantSession`：`start()`、`wake(ev)`、`userMessage(text)`、`pause()`、`resume()`、`setTask(t)`、`stop()` | [AI 助手](17-assistant.md) 第 2 节；一次只运行一轮，待处理位只留最新的一次，用户消息不会被心跳叫醒替换 |
+| `heartbeat.ts` | `class Heartbeat`：`sample()`、`markWake(frame)`；`tileChanges(a, b)` | 17 第 3 节 |
+| `win.ts` | `foregroundWindow()`、`userIdleMs()` | 前台程序和空闲时长（koffi） |
+| `gate.ts` | `class RuleGate`、`class JevGate`、`class CompositeGate`；`hardLimits()`、`jevAsk()`、`makeGate()` | 17 第 4 节、第 10.2 节 |
+| `platform.ts` | `class Platform`：`grab(region?)`、`read(img)`、`translations()`、`annotate(items)`、`clearAnnotations(ids?)`、`close()` | 经主程序取得采集、OCR、归一化、协调器和覆盖层 |
+| `tools.ts` | `platformTools(ctx): PlatformTool[]`；`systemPrompt(task)` | 17 第 6 节，TypeBox 定义一份，供 pi 和 MCP 共用 |
+| `brain-pi.ts` | `class PiBrain` | 17 第 5.2 节、第 10.3 节 |
+| `brain-claude.ts` | `class ClaudeCodeBrain`；`wakeText(ev)` | 17 第 5.2 节、第 10.3 节 |
+| `mcp.ts` | 独立进程 | Claude Code 启动的 MCP stdio 代理 |
+
+桌面端的 AI 卡片在 `apps/desktop/src/main/assistant-card.ts`（`class AssistantCard`：`summon()`、`ask(text)`、`close()`）和 `renderer/assistant.*`。
 
 ## 15 apps/desktop
 

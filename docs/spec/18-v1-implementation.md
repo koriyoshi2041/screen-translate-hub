@@ -283,6 +283,13 @@ Chromium 的透明窗口依赖 GPU 合成。远程桌面、虚拟显示器和部
 
 跟随窗口时覆盖层不置顶，每次跟随检查都把它放到目标窗口正上方（`placeAbove`）。后台进程调用 `SetWindowPos(HWND_TOP)` 返回成功却不生效，能做的只有"插到某个窗口之后"和"自己的窗口置顶、取消置顶"；插到置顶窗口之后又会让窗口变成置顶，盖住无关的对话框。所以：目标窗口上方是置顶窗口（目标在普通层最上）时，先置顶再 `HWND_NOTOPMOST`，落在普通层最上；否则插在目标上方那个窗口之后。
 
+### 15.2 历史记录、工作流文件和代理
+
+- **历史记录**（需求 09 第 2 节"部分"）：`packages/agent-core/src/history.ts` 的 `HistoryStore` 在 `%APPDATA%\screen-translate-hub\history\YYYY-MM-DD\` 下每条记录写一个 JSON 文件；截图翻译另存一张 JPEG（由主程序用 `nativeImage` 编码，`agent-core` 不依赖 Electron）。截图翻译完成时运行协调器经 `agent.SaveHistory` 发送原文、译文、失败原因和相对位置；AI 助手会话结束时发送任务和对话。不做容量管理和同步，托盘菜单可以打开这个目录；
+- **原位截图结果的关闭**：Esc，或者在结果范围之外按下鼠标左键。结果窗口让点击穿透，所以按键是轮询得到的（每 50 毫秒），在结果范围之内的点击照常交给下面的窗口；
+- **工作流文件**：节点编辑器之前，数据目录下的 `workflows/screenshot.json`、`workflows/continuous.json` 存在时代替从设置生成的默认工作流。文件先经 `@sth/workflow` 的静态校验，`entry` 也必须对应；有问题时弹出通知并沿用默认工作流；
+- **外部服务的代理**：翻译源和 AI 助手的设置可以带 `proxy`（如 `http://127.0.0.1:7890`）。服务进程启动时带上 `NODE_USE_ENV_PROXY=1`、`HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY=127.0.0.1,localhost`，Node 24 的 `fetch` 据此经代理连接外部服务，本机服务之间的连接不受影响。Claude Code 子进程继承同样的变量。
+
 ## 16 开发与测试
 
 - 单元测试：`npm test` 运行全部 TS 包的 `node:test`，`npm run test:py` 运行 Python 包；

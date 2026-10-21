@@ -55,6 +55,13 @@ test('wrap breaks CJK anywhere and Latin at spaces', () => {
   assert.deepEqual(wrap('hello big world', 10, 50, measure), ['hello big', 'world']);
 });
 
+test('wrap keeps closing punctuation off the line start and opening off the line end', () => {
+  // 5 px per character: 6 characters per 30 px line
+  assert.deepEqual(wrap('准备本地缓存。', 10, 30, measure), ['准备本地缓', '存。']);
+  assert.deepEqual(wrap('首先点击“开始”按钮。', 10, 40, measure), ['首先点击“开始”', '按钮。']);
+  assert.deepEqual(wrap('你好世界（测试）', 10, 25, measure), ['你好世界', '（测试）']);
+});
+
 test('fitText: shrink, then borrow space below, then truncate', () => {
   const box = { x: 0, y: 0, w: 100, h: 20 };
   const a = fitText({ text: 'short', box, vertical: false, minPx: 8, maxPx: 18, lineHeight: 1.1, measure });

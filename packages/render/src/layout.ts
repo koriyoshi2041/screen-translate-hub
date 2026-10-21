@@ -54,7 +54,30 @@ export function breakPieces(text: string): string[] {
     }
   }
   if (cur) pieces.push(cur);
-  return pieces;
+  return keepPunctuation(pieces);
+}
+
+// Line-breaking rules for East Asian text (kinsoku): closing punctuation never starts a
+// line and opening punctuation never ends one.
+const NO_LINE_START = new Set([...'。，、．！？：；）」』】〉》〕｝”’…‥ー々ゝゞぁぃぅぇぉっゃゅょァィゥェォッャュョ%),.!?:;]}']);
+const NO_LINE_END = new Set([...'（「『【〈《〔｛“‘([{']);
+
+function keepPunctuation(pieces: string[]): string[] {
+  const out: string[] = [];
+  let carry = '';
+  for (const p of pieces) {
+    const piece = carry + p;
+    carry = '';
+    if (out.length > 0 && NO_LINE_START.has([...p][0]) && !out[out.length - 1].endsWith(' ')) {
+      out[out.length - 1] += piece;
+    } else if (NO_LINE_END.has([...piece].pop() ?? '')) {
+      carry = piece;
+    } else {
+      out.push(piece);
+    }
+  }
+  if (carry) out.push(carry);
+  return out;
 }
 
 /** Greedy line filling: put as much as possible on each line (spec 07 section 5.3). */

@@ -71,6 +71,28 @@ test('stacked menu labels are not merged (v1 rule)', () => {
   assert.equal(units.length, 3);
 });
 
+test('a heading is not merged into the paragraph below it (v1 rule)', () => {
+  // measured on Notepad: the heading gap is smaller than one line height
+  const units = run([
+    blk('Release notes', 593, 130, 109, 23),
+    blk("We've launched the memory tool in beta, enabling the assistant to store and consult information across", 592, 169, 758, 24),
+    blk('conversations.', 594, 192, 110, 20),
+    blk('发布说明', 593, 240, 80, 23),
+    blk('我们推出了测试版的记忆工具，使助手能够跨对话存储和查阅信息，并且可以在之后的会话里', 592, 279, 758, 24),
+    blk('继续使用。', 594, 302, 110, 20),
+  ]);
+  assert.deepEqual(units.map((u) => u.lines?.length), [1, 2, 1, 2]);
+});
+
+test('a short line followed by a lowercase continuation still merges', () => {
+  const units = run([
+    blk('A long first line of a paragraph that spans the whole column', 100, 100, 900, 20),
+    blk('short line', 100, 126, 120, 20),
+    blk('continued in lowercase on the next line of the same paragraph', 100, 152, 880, 20),
+  ]);
+  assert.equal(units.length, 1);
+});
+
 test('vertical Japanese columns read right to left, bubbles separate', () => {
   const units = run([
     // bubble A on the right: two columns

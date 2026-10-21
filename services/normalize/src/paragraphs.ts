@@ -30,11 +30,16 @@ export function shouldMerge(a: Line, b: Line, colWidth: number, p: NormalizePara
     : overlap1d(a.box.x, a.box.x + a.box.w, b.box.x, b.box.x + b.box.w);
   if (ov < p.ko * Math.min(extent(a), extent(b))) return false; // 5
   if (endsWithSentencePunct(a.text) && extent(a) < p.ks * colWidth) return false; // 6
+  if (v || endsWithContinuation(a.text)) return true;
+  const startsUnit = /^[\p{Lu}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(b.text.trimStart());
+  // v1 addition: a line that stops well short of the column (a heading, or the last line of a
+  // paragraph without final punctuation) ends its unit when the next line starts a new one.
+  if (extent(a) < p.shortLine * colWidth && startsUnit) return false;
   // v1 addition: stacked short labels of a Latin UI (menus, lists) are separate units.
   const short = (l: Line) => extent(l) < p.shortLine * colWidth || l.text.trim().split(/\s+/).length <= 4;
-  if (!v && short(a) && short(b)) {
+  if (short(a) && short(b)) {
     const aligned = a.dir === 'rtl' ? Math.abs(a.box.x + a.box.w - (b.box.x + b.box.w)) < 0.5 * h : Math.abs(a.box.x - b.box.x) < 0.5 * h;
-    if (aligned && /^[A-Z]/.test(b.text.trimStart()) && !endsWithContinuation(a.text)) return false;
+    if (aligned && /^[A-Z]/.test(b.text.trimStart())) return false;
   }
   return true;
 }

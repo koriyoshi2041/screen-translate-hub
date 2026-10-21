@@ -3,15 +3,16 @@
 import { AgentCore, catalog, RunLauncher, type RunHandle } from '@sth/agent-core';
 import type { CaptureRange, Image } from '@sth/model';
 import { connect, Peer } from '@sth/wire';
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeImage, Notification, Tray } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { networkInterfaces } from 'node:os';
 import { join, resolve } from 'node:path';
 import { CardService } from './card.ts';
 import { OverlayManager, type WindowEnv } from './overlay.ts';
 import { selectRegion, type PhysicalRect } from './select.ts';
-import { SettingsStore, workflows, type Patch, type Settings } from './settings.ts';
+import { newAccessCode, SettingsStore, workflows, type Patch, type Settings } from './settings.ts';
 import * as win32 from './win32.ts';
 
 app.setName('screen-translate-hub');
@@ -61,7 +62,7 @@ function defineServices(s: Settings): void {
     node: nodePath(),
     translators: s.translators,
     excludePids: [process.pid],
-    viewer: s.viewer.enabled ? { port: s.viewer.port, host: '0.0.0.0', access_token: s.viewer.access_token } : undefined,
+    viewer: s.viewer.enabled ? { port: s.viewer.port, host: s.viewer.host, access_token: s.viewer.access_token } : undefined,
   });
   for (const spec of specs) agent.define(spec);
 }
@@ -139,11 +140,45 @@ async function stopContinuous(): Promise<void> {
 
 // ---------------- tray, hotkeys, settings window ----------------
 
+/** Addresses phones on the same network can open: private IPv4 first, loopback when listening only locally. */
+function viewerAddresses(): string[] {
+  const s = store.value.viewer;
+  if (s.host === '127.0.0.1') return [`http://127.0.0.1:${s.port}`];
+  const ips: string[] = [];
+  for (const list of Object.values(networkInterfaces())) {
+    for (const a of list ?? []) if (a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.')) ips.push(a.address);
+  }
+  const isPrivate = (ip: string) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip);
+  ips.sort((a, b) => Number(isPrivate(b)) - Number(isPrivate(a)));
+  return ips.map((ip) => `http://${ip}:${s.port}`);
+}
+
+/** The link carries the access code in the fragment, which browsers never send to the server. */
+function viewerLink(): string {
+  return `${viewerAddresses()[0] ?? `http://127.0.0.1:${store.value.viewer.port}`}/#k=${store.value.viewer.access_token}`;
+}
+
+async function newViewerCode(): Promise<void> {
+  const code = newAccessCode();
+  store.update({ viewer: { access_token: code } });
+  try {
+    const reg = await agent.waitFor('viewer');
+    const conn = await connect(reg.endpoint, { token: agent.token, peer: 'agent' });
+    try {
+      await new Peer(conn, reg.manifest.name).unary('viewer', 'SetAccessToken', { access_token: code }, { deadlineMs: 5_000 });
+    } finally {
+      conn.close();
+    }
+  } catch (e) {
+    console.error('viewer access code not applied:', (e as Error).message);
+  }
+  refreshTray();
+}
+
 function refreshTray(): void {
   if (!tray) return;
   const st = continuous?.active ? continuous.status.state : 'idle';
   const s = store.value;
-  const viewerUrl = `http://<this-pc>:${s.viewer.port}/?t=${s.viewer.access_token}`;
   tray.setToolTip(`screen-translate-hub (${st})`);
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -157,7 +192,14 @@ function refreshTray(): void {
       { label: 'Show translations', type: 'checkbox', checked: true, click: () => overlay.toggleVisible() },
       { label: 'Interactive overlay', type: 'checkbox', checked: false, click: () => overlay.toggleInteractive() },
       { label: 'Share to LAN viewers', type: 'checkbox', checked: s.sharing, click: (i) => setSharing(i.checked) },
-      { label: `Viewer: ${viewerUrl}`, enabled: false },
+      ...(s.viewer.enabled
+        ? [
+            { label: `Viewer: ${viewerAddresses()[0] ?? 'no network'}`, enabled: false },
+            { label: `Access code: ${s.viewer.access_token}`, enabled: false },
+            { label: 'Copy viewer link', click: () => clipboard.writeText(viewerLink()) },
+            { label: 'New access code', click: () => void newViewerCode() },
+          ]
+        : []),
       { type: 'separator' },
       { label: 'Settings...', click: () => openSettings() },
       { label: 'Quit', click: () => app.quit() },
@@ -282,6 +324,10 @@ function startDevControl(): void {
             });
           }
           out = { pages };
+        } else if (a.action === 'sharing') {
+          setSharing(a.on === true);
+        } else if (a.action === 'viewer-link') {
+          out = { link: viewerLink(), addresses: viewerAddresses() };
         } else if (a.action === 'overlay-eval') {
           const h = [...overlay.hosts(), ...cards.hosts()][Number(a.index ?? 0)];
           out = { result: h ? await h.eval(String(a.js)) : null };

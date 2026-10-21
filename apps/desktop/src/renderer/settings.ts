@@ -23,6 +23,7 @@ function fill(): void {
   $('viewer_enabled').checked = s.viewer.enabled;
   $('viewer_port').value = String(s.viewer.port);
   $('viewer_token').value = s.viewer.access_token;
+  $('viewer_local').checked = s.viewer.host === '127.0.0.1';
   $('sharing').checked = s.sharing;
   const hk = $<HTMLFieldSetElement>('hotkeys');
   hk.innerHTML = '';
@@ -62,7 +63,12 @@ function collect(): Settings {
       screenshot_placement: $('screenshot_placement').value,
     },
     continuous: { range: $('range').value, interval_ms: Number($('interval_ms').value) },
-    viewer: { enabled: $('viewer_enabled').checked, port: Number($('viewer_port').value), access_token: $('viewer_token').value },
+    viewer: {
+      enabled: $('viewer_enabled').checked,
+      host: $('viewer_local').checked ? '127.0.0.1' : '0.0.0.0',
+      port: Number($('viewer_port').value),
+      access_token: $('viewer_token').value,
+    },
     sharing: $('sharing').checked,
     hotkeys,
     assistant: {

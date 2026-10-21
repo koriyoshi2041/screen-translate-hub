@@ -15,7 +15,8 @@ export interface Settings {
     range: 'display' | 'follow_active_window' | 'window_under_cursor';
     interval_ms: number;
   };
-  viewer: { enabled: boolean; port: number; access_token: string };
+  /** LAN viewer (requirement 09 section 3.4); host 0.0.0.0 listens on every network, 127.0.0.1 only on this computer. */
+  viewer: { enabled: boolean; host: string; port: number; access_token: string };
   sharing: boolean;
   hotkeys: Record<string, string>;
   assistant: {
@@ -37,13 +38,20 @@ export const DEFAULT_HOTKEYS: Record<string, string> = {
   assistant: 'Alt+Shift+A',
 };
 
+/** 12 characters a phone user can type: 60 bits, with the viewer locking out repeated failures. */
+export function newAccessCode(): string {
+  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789'; // no 0/o, 1/l/i
+  const bytes = randomBytes(12);
+  return [...bytes].map((b) => alphabet[b % alphabet.length]).join('');
+}
+
 export function defaults(): Settings {
   return {
     target_language: 'zh-Hans',
     translators: [{ name: 'translate.claude-cli', engine: 'claude-cli', model: 'haiku', warm: 2 }],
     display: defaultSettings('overlay'),
     continuous: { range: 'display', interval_ms: 700 },
-    viewer: { enabled: true, port: 8848, access_token: randomBytes(6).toString('hex') },
+    viewer: { enabled: true, host: '0.0.0.0', port: 8848, access_token: newAccessCode() },
     sharing: false,
     hotkeys: { ...DEFAULT_HOTKEYS },
     assistant: { brain: 'claude-code', model: 'haiku', heartbeat_ms: 4000, gate: 'rules' },

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cacheKey, iou, orderQuad, pxRect, sameBaseLanguage, supports, type Quad } from '../src/index.ts';
+import { cacheKey, iou, orderQuad, pxRect, sameLanguage, supports, type Quad } from '../src/index.ts';
 
 test('orderQuad starts at min x+y and goes clockwise on screen', () => {
   const q = orderQuad([
@@ -34,11 +34,12 @@ test('language lookup per RFC 4647 (spec 00 section 3.5)', () => {
   assert.ok(supports(['en'], 'en-US'));
 });
 
-test('same base language (requirement 09 section 3.2)', () => {
-  assert.ok(sameBaseLanguage('zh', 'zh-Hans'));
-  assert.ok(sameBaseLanguage('en-US', 'en'));
-  assert.ok(!sameBaseLanguage('ja', 'zh-Hans'));
-  assert.ok(!sameBaseLanguage(undefined, 'en'));
+test('same language (requirement 09 section 3.2)', () => {
+  assert.ok(sameLanguage('zh', 'zh-Hans'));
+  assert.ok(sameLanguage('en-US', 'en'));
+  assert.ok(!sameLanguage('zh-Hant', 'zh-Hans'));
+  assert.ok(!sameLanguage('ja', 'zh-Hans'));
+  assert.ok(!sameLanguage(undefined, 'en'));
 });
 
 test('cache key examples from spec 02 section 8', () => {

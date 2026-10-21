@@ -29,8 +29,22 @@ export function baseLanguage(tag: string): string {
   return normalizeTag(tag).split('-')[0];
 }
 
-/** Same primary language subtag, e.g. zh and zh-Hans (requirement 09 section 3.2). */
-export function sameBaseLanguage(a: string | undefined, b: string | undefined): boolean {
+export function scriptSubtag(tag: string): string | undefined {
+  return normalizeTag(tag)
+    .split('-')
+    .slice(1)
+    .find((p) => p.length === 4);
+}
+
+/**
+ * Requirement 09 section 3.2: a paragraph needs no translation when its language is the
+ * target language. Same primary subtag, and the same script when both name one:
+ * zh and zh-Hans match, zh-Hant and zh-Hans do not (traditional to simplified is a translation).
+ */
+export function sameLanguage(a: string | undefined, b: string | undefined): boolean {
   if (!a || !b || a === 'auto' || b === 'auto') return false;
-  return baseLanguage(a) === baseLanguage(b);
+  if (baseLanguage(a) !== baseLanguage(b)) return false;
+  const sa = scriptSubtag(a);
+  const sb = scriptSubtag(b);
+  return !sa || !sb || sa === sb;
 }

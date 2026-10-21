@@ -1,0 +1,30 @@
+// Drive the running desktop app through its dev control port (SSH testing).
+//   node tools/dev/ctl.ts state
+//   node tools/dev/ctl.ts screenshot 100 100 800 400
+//   node tools/dev/ctl.ts continuous-start [display|follow_active_window|window_under_cursor]
+//   node tools/dev/ctl.ts continuous-stop | details | dismiss | overlay-shots
+//   node tools/dev/ctl.ts settings '{"display":{"mode":"dim"}}'
+//   node tools/dev/ctl.ts overlay-eval "document.body.innerHTML.length" [host index]
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const cfg = JSON.parse(readFileSync(join(process.env.APPDATA ?? '', 'screen-translate-hub', 'dev-control.json'), 'utf8')) as { port: number; token: string };
+const [action, ...rest] = process.argv.slice(2);
+const body: Record<string, unknown> = { action };
+if (action === 'screenshot') {
+  const [x, y, w, h] = rest.map(Number);
+  body.rect = { x, y, w, h };
+} else if (action === 'continuous-start') body.mode = rest[0] ?? 'display';
+else if (action === 'settings') body.patch = JSON.parse(rest[0]);
+else if (action === 'overlay-eval') {
+  body.js = rest[0].startsWith('@') ? readFileSync(rest[0].slice(1), 'utf8') : rest[0];
+  body.index = Number(rest[1] ?? 0);
+}
+
+const res = await fetch(`http://127.0.0.1:${cfg.port}/`, { method: 'POST', headers: { 'x-sth-token': cfg.token }, body: JSON.stringify(body) });
+const text = await res.text();
+try {
+  console.log(JSON.stringify(JSON.parse(text), null, 2));
+} catch {
+  console.log(res.status, text);
+}

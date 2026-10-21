@@ -51,6 +51,12 @@ export function displayAffinity(hwnd: number): number {
 }
 
 const GetAsyncKeyState = user32.func('int16 __stdcall GetAsyncKeyState(int key)');
+const SetForegroundWindow = user32.func('bool __stdcall SetForegroundWindow(intptr hwnd)');
+
+/** Give the keyboard back to a window; works while this process owns the foreground (after the hotkey). */
+export function setForeground(hwnd: number): boolean {
+  return !!hwnd && isWindow(hwnd) && SetForegroundWindow(hwnd);
+}
 
 /** Whether the left mouse button is down right now. */
 export function leftButtonDown(): boolean {

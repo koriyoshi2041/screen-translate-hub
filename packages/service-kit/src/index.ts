@@ -124,3 +124,5 @@ export async function runService(name: string, start: (boot: Boot) => Promise<Se
     process.exit(1);
   }
 }
+
+export { Clients, type LocalService, type ResolvedService } from './clients.ts';

@@ -4,6 +4,8 @@
 //   node tools/dev/ctl.ts continuous-start [display|follow_active_window|window_under_cursor]
 //   node tools/dev/ctl.ts continuous-stop | details | dismiss | overlay-shots | viewer-link
 //   node tools/dev/ctl.ts sharing on|off
+//   node tools/dev/ctl.ts assistant [message]    (opens the AI card; with a message, sends it)
+//   node tools/dev/ctl.ts assistant-card          (the card's state, status line and log)
 //   node tools/dev/ctl.ts settings '{"display":{"mode":"dim"}}'   (or @patch.json from PowerShell)
 //   node tools/dev/ctl.ts overlay-eval "document.body.innerHTML.length" [host index]
 import { readFileSync } from 'node:fs';
@@ -17,6 +19,7 @@ if (action === 'screenshot') {
   body.rect = { x, y, w, h };
 } else if (action === 'continuous-start') body.mode = rest[0] ?? 'display';
 else if (action === 'sharing') body.on = rest[0] !== 'off';
+else if (action === 'assistant') body.text = rest.join(' ');
 // '@file' reads the argument from a file (Windows PowerShell 5.1 strips quotes inside arguments)
 const dropBom = (s: string) => (s.charCodeAt(0) === 0xfeff ? s.slice(1) : s);
 const arg = (s: string) => (s.startsWith('@') ? dropBom(readFileSync(s.slice(1), 'utf8')) : s);

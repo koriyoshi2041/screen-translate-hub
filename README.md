@@ -27,7 +27,7 @@ npm run setup:py            # .venv 与 Python 服务的依赖（采集、OCR）
 npm run desktop             # 构建并启动桌面主程序（托盘图标）
 ```
 
-默认翻译源是本机已登录的 Claude Code（`claude` 在 PATH 上）加 Bergamot；Bergamot 第一次使用时下载约 50 MB 的模型。快捷键：Alt+Shift+S 截图翻译，Alt+Shift+C 开始或暂停持续翻译，Alt+Shift+H 显示或隐藏覆盖层，Alt+Shift+I 交互模式，Alt+Shift+A AI 助手。手机观看：托盘菜单"Copy viewer link"，在同一网络的手机上打开；第一次运行时 Windows 防火墙会询问是否允许 Node.js 接受连接，需要允许。
+默认翻译源是本机已登录的 Claude Code（`claude` 在 PATH 上）加 Bergamot；Bergamot 第一次使用时下载约 50 MB 的模型。快捷键：Alt+Shift+S 截图翻译，Alt+Shift+C 开始或暂停持续翻译，Alt+Shift+H 显示或隐藏覆盖层，Alt+Shift+I 交互模式，Alt+Shift+A AI 助手。手机观看：托盘菜单"Copy viewer link"，在同一网络的手机上打开；第一次运行时 Windows 防火墙会询问是否允许 Node.js 接受连接；也可以在管理员 PowerShell 中运行 `tools/win/allow-viewer.ps1`，只放行观看端口、只在专用网络上放行。
 
 测试：`npm test`（TypeScript 各包）、`npm run test:py`（Python 服务）、`npm run typecheck`。经 SSH 在远程电脑上开发时的工具见 [第一版实现](docs/spec/18-v1-implementation.md) 第 16 节。
 

@@ -17,18 +17,44 @@ function overlap1d(a0: number, a1: number, b0: number, b1: number): number {
   return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
 }
 
-export function shouldMerge(a: Line, b: Line, colWidth: number, p: NormalizeParams): boolean {
-  if (a.dir !== b.dir) return false; // 2
+/** Gap between consecutive lines in line heights, or null when they could never merge (conditions 2 to 5). */
+function lineGap(a: Line, b: Line, p: NormalizeParams): number | null {
+  if (a.dir !== b.dir) return null; // 2
   const ratio = Math.max(a.glyph, b.glyph) / Math.max(1e-6, Math.min(a.glyph, b.glyph));
-  if (ratio > p.kh) return false; // 3
+  if (ratio > p.kh) return null; // 3
   const v = isVertical(a.dir);
   const h = Math.min(a.glyph, b.glyph);
   const dist = v ? a.box.x - (b.box.x + b.box.w) : b.box.y - (a.box.y + a.box.h);
-  if (dist < -p.kv * h || dist > p.kg * h) return false; // 4
+  if (dist < -p.kv * h || dist > p.kg * h) return null; // 4
   const ov = v
     ? overlap1d(a.box.y, a.box.y + a.box.h, b.box.y, b.box.y + b.box.h)
     : overlap1d(a.box.x, a.box.x + a.box.w, b.box.x, b.box.x + b.box.w);
-  if (ov < p.ko * Math.min(extent(a), extent(b))) return false; // 5
+  if (ov < p.ko * Math.min(extent(a), extent(b))) return null; // 5
+  return dist / h;
+}
+
+/**
+ * v1 addition: the usual gap between lines of one paragraph in a leaf, the lower quartile
+ * of the gaps of mergeable neighbours; undefined with fewer than two of them.
+ */
+export function usualGap(lines: Line[], p: NormalizeParams): number | undefined {
+  const gaps: number[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const g = lineGap(lines[i - 1], lines[i], p);
+    if (g !== null) gaps.push(g);
+  }
+  if (gaps.length < 2) return undefined;
+  gaps.sort((x, y) => x - y);
+  return gaps[Math.floor((gaps.length - 1) / 4)];
+}
+
+export function shouldMerge(a: Line, b: Line, colWidth: number, p: NormalizeParams, baseGap?: number): boolean {
+  const gap = lineGap(a, b, p);
+  if (gap === null) return false; // 2 to 5
+  const v = isVertical(a.dir);
+  const h = Math.min(a.glyph, b.glyph);
+  // v1 addition: paragraphs set apart by extra spacing, even when it is under kg
+  if (baseGap !== undefined && gap > baseGap + p.kp) return false;
   if (endsWithSentencePunct(a.text) && extent(a) < p.ks * colWidth) return false; // 6
   if (v || endsWithContinuation(a.text)) return true;
   const startsUnit = /^[\p{Lu}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(b.text.trimStart());
@@ -47,6 +73,7 @@ export function shouldMerge(a: Line, b: Line, colWidth: number, p: NormalizePara
 export function mergeParagraphs(leaf: OrderItem<Piece>[], p: NormalizeParams): Paragraph[] {
   const lines = leaf.flatMap((it) => (it.ref.kind === 'line' ? [it.ref.line] : []));
   const colWidth = Math.max(1, ...lines.map(extent));
+  const baseGap = usualGap(lines, p);
   const out: Paragraph[] = [];
   let current: Line[] | null = null;
   for (const it of leaf) {
@@ -56,7 +83,7 @@ export function mergeParagraphs(leaf: OrderItem<Piece>[], p: NormalizeParams): P
       continue;
     }
     const line = it.ref.line;
-    if (current && shouldMerge(current[current.length - 1], line, colWidth, p)) {
+    if (current && shouldMerge(current[current.length - 1], line, colWidth, p, baseGap)) {
       current.push(line);
     } else {
       current = [line];

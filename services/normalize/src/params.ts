@@ -20,6 +20,8 @@ export interface NormalizeParams {
   fragGap: number;
   /** v1 addition: a "short" line is narrower than this fraction of the column width. */
   shortLine: number;
+  /** v1 addition: a gap wider than the leaf's usual line gap by this many line heights is a paragraph break. */
+  kp: number;
 }
 
 export const DEFAULT_PARAMS: NormalizeParams = {
@@ -32,4 +34,5 @@ export const DEFAULT_PARAMS: NormalizeParams = {
   fragOverlap: 0.6,
   fragGap: 0.5,
   shortLine: 0.6,
+  kp: 0.4,
 };

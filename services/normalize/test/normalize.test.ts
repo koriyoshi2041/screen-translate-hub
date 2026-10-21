@@ -84,6 +84,18 @@ test('a heading is not merged into the paragraph below it (v1 rule)', () => {
   assert.deepEqual(units.map((u) => u.lines?.length), [1, 2, 1, 2]);
 });
 
+test('extra spacing between paragraphs splits them even under kg (v1 rule)', () => {
+  // measured on a Tk text widget: line pitch 21 px, paragraph pitch 35 px, boxes 21 px high
+  const units = run([
+    blk('The installer now runs without administrator rights and finishes in under a minute.', 596, 163, 713, 21),
+    blk('When the installation finishes, start the program from the start menu. The first start', 596, 199, 714, 21),
+    blk('takes a little longer because the program prepares its local cache.', 596, 220, 600, 21),
+    blk('Open the settings page and choose the account section. Enter the address of your', 595, 255, 712, 21),
+    blk('server and press the connect button.', 595, 276, 300, 21),
+  ]);
+  assert.deepEqual(units.map((u) => u.lines?.length), [1, 2, 2]);
+});
+
 test('a short line followed by a lowercase continuation still merges', () => {
   const units = run([
     blk('A long first line of a paragraph that spans the whole column', 100, 100, 900, 20),

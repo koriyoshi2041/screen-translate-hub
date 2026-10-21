@@ -244,7 +244,10 @@ export class Run implements RaceSink {
         if (!this.start.image) throw new Error('screenshot run needs an image');
         await this.processBatch({ frame_id: 1, frame: this.start.image });
         await this.hub.flush();
-        if (this.state === 'running') this.setState('completed');
+        if (this.state === 'running') {
+          this.setState('completed');
+          void this.saveScreenshotHistory();
+        }
       } else {
         await this.runContinuous();
       }
@@ -256,6 +259,22 @@ export class Run implements RaceSink {
       this.hub.closeAll();
       this.clients.release();
     }
+  }
+
+  /** Requirement 09 section 2: a finished screenshot translation goes to this computer's history. */
+  private async saveScreenshotHistory(): Promise<void> {
+    const snap = this.displaySnapshot();
+    if (!snap || !this.start.image) return;
+    const paragraphs = snap.paragraphs.map(({ paragraph: p, shown }) => ({
+      source: p.text,
+      translation: shown?.show === 'text' ? shown.text : undefined,
+      failed: shown?.show === 'error' ? shown.error_reason : undefined,
+      bounds: p.bounds,
+    }));
+    if (!paragraphs.length) return;
+    await this.clients.agent
+      .unary('agent', 'SaveHistory', { entry: { kind: 'screenshot', run_id: this.id, target_language: this.targetLanguage(), image: this.start.image, paragraphs } }, { deadlineMs: 10_000 })
+      .catch(() => undefined);
   }
 
   /** Spec 04 section 3.1. */

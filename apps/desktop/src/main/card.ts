@@ -97,15 +97,39 @@ export class CardService {
     };
   }
 
-  /** While in-place results are on screen, Esc dismisses them. */
+  /**
+   * While in-place results are on screen, Esc or a click outside them dismisses them
+   * (requirement 09 section 3.1). The results let clicks through, so a click is seen by
+   * polling the button; a click inside a result stays with the window under it.
+   */
   private updateEsc(): void {
     const want = this.inplace.length > 0;
     if (want && !this.escRegistered) {
       this.escRegistered = globalShortcut.register('Escape', () => this.dismissInPlace());
+      this.wasDown = win32.leftButtonDown();
+      this.clickTimer = setInterval(() => this.watchClick(), 50);
     } else if (!want && this.escRegistered) {
       globalShortcut.unregister('Escape');
       this.escRegistered = false;
+      if (this.clickTimer) clearInterval(this.clickTimer);
+      this.clickTimer = undefined;
     }
+  }
+
+  private wasDown = false;
+  private clickTimer?: ReturnType<typeof setInterval>;
+
+  private watchClick(): void {
+    const down = win32.leftButtonDown();
+    if (down && !this.wasDown) {
+      const c = win32.cursorPos();
+      const inside = this.inplace.some((h) => {
+        const b = h.getBounds();
+        return c.x >= b.x && c.y >= b.y && c.x < b.x + b.w && c.y < b.y + b.h;
+      });
+      if (!inside) this.dismissInPlace();
+    }
+    this.wasDown = down;
   }
 
   dismissInPlace(): void {

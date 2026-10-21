@@ -9,6 +9,7 @@ const PRESETS: Record<string, Record<string, unknown>> = {
   claude: { name: 'translate.claude-cli', engine: 'claude-cli', model: 'haiku', warm: 2 },
   openai: { name: 'translate.openai', engine: 'openai', base_url: 'https://api.openai.com/v1', model: 'gpt-5-mini', api_key: '' },
   anthropic: { name: 'translate.anthropic', engine: 'anthropic', model: 'claude-haiku-5-5', api_key: '' },
+  bergamot: { name: 'translate.bergamot', engine: 'bergamot' },
   mock: { name: 'translate.mock', engine: 'mock', prefix: '[mock] ', latency_ms: 200 },
 };
 

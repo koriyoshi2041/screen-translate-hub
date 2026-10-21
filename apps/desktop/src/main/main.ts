@@ -62,7 +62,8 @@ function defineServices(s: Settings): void {
   const specs = catalog({
     root,
     node: nodePath(),
-    translators: s.translators,
+    // Bergamot keeps Firefox's models with the app's data and fetches the target language early
+    translators: s.translators.map((t) => (t.engine === 'bergamot' ? { dir: join(store.dir, 'bergamot'), target_language: s.target_language, ...t } : t)),
     excludePids: [process.pid],
     viewer: s.viewer.enabled ? { port: s.viewer.port, host: s.viewer.host, access_token: s.viewer.access_token } : undefined,
     assistant: { ...s.assistant, own_pids: [process.pid], data_dir: store.dir },
@@ -255,7 +256,7 @@ function openSettings(): void {
 ipcMain.handle('sth', async (_e, msg: { kind: string; patch?: Patch<Settings> }) => {
   if (msg.kind === 'get-settings') return store.value;
   if (msg.kind === 'save-settings' && msg.patch) {
-    const services = () => JSON.stringify([store.value.translators, store.value.viewer, store.value.assistant]);
+    const services = () => JSON.stringify([store.value.translators, store.value.viewer, store.value.assistant, store.value.target_language]);
     const before = services();
     store.update(msg.patch);
     overlay.applySettings(store.value.display);
@@ -298,7 +299,10 @@ function startDevControl(): void {
         else if (a.action === 'settings') {
           store.update(a.patch as Patch<Settings>);
           overlay.applySettings(store.value.display);
-        } else if (a.action === 'details' && continuous) out = await launcher.details(continuous.id);
+        } else if (a.action === 'details') {
+          const id = (a.run_id as string | undefined) ?? continuous?.id;
+          out = id ? await launcher.details(id) : null;
+        }
         else if (a.action === 'dismiss') cards.dismissInPlace();
         else if (a.action === 'open-settings') openSettings();
         else if (a.action === 'win-info') {

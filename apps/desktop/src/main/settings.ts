@@ -48,7 +48,11 @@ export function newAccessCode(): string {
 export function defaults(): Settings {
   return {
     target_language: 'zh-Hans',
-    translators: [{ name: 'translate.claude-cli', engine: 'claude-cli', model: 'haiku', warm: 2 }],
+    // preferred first: the AI translation replaces the faster offline one (william's old app)
+    translators: [
+      { name: 'translate.claude-cli', engine: 'claude-cli', model: 'haiku', warm: 2 },
+      { name: 'translate.bergamot', engine: 'bergamot' },
+    ],
     display: defaultSettings('overlay'),
     continuous: { range: 'display', interval_ms: 700 },
     viewer: { enabled: true, host: '0.0.0.0', port: 8848, access_token: newAccessCode() },

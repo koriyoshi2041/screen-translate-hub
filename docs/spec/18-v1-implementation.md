@@ -15,6 +15,24 @@
 | 网页观看端 | TypeScript，浏览器原生 DOM | 与覆盖层共用 `@sth/render` |
 | 服务协议 | 第 3 节，WebSocket + MessagePack | Node 和 Python 都有成熟实现；流、时限、取消、状态码的语义与 [服务协议](08-service-protocol.md) 相同 |
 
+第一版的第三方依赖与许可（项目本身是 AGPL-3.0 加商业许可双授权，见 [技术选型](15-tech-selection.md) 第 1 节的许可规则）：
+
+| 依赖 | 版本 | 许可 | 用在 |
+| --- | --- | --- | --- |
+| Electron | 45 | MIT | 桌面主程序 |
+| koffi | 3.3 | MIT | Win32 调用 |
+| ws、@msgpack/msgpack | 8.22、3.1 | MIT、ISC | 服务协议 |
+| sharp（含 libvips） | 0.35 | Apache-2.0；libvips 为 LGPL-3.0，动态链接 | 观看服务的画面编码、AI 截屏 |
+| esbuild | 0.28 | MIT | 构建、观看页打包 |
+| @earendil-works/pi-coding-agent、typebox | 1.3、1.3 | MIT | pi 大脑、工具定义 |
+| @typesafe-ai/sdk | 0.7 | MIT | jev 门控 |
+| Bergamot 胶水代码（vendor） | v0.6.0 | MPL-2.0，按文件保留许可声明 | Bergamot 翻译源 |
+| Bergamot 引擎与 Firefox 翻译模型 | 运行时下载 | 随 Mozilla 的发布条款；不随本软件分发 | Bergamot 翻译源 |
+| windows-capture、RapidOCR、onnxruntime、OpenCV、numpy | 2.0、3.10、1.31、5.0、2.5 | MIT、Apache-2.0、MIT、Apache-2.0、BSD-3-Clause | 采集、OCR |
+| websockets、msgpack（Python） | 17.3、1.2 | BSD-3-Clause、Apache-2.0 | 服务协议 |
+
+都是宽松许可或文件级的弱著佐权许可，可以同时以 AGPL-3.0 和商业许可发布本项目。
+
 原技术选型（[技术选型](15-tech-selection.md)）中的 Rust、Tauri 方案保留为后续路线：协议与语言无关，任何一个服务都可以单独用 Rust 重写后替换，其他服务不受影响。第一版先用开发最快、在这台电脑上就能完整测试的组合。
 
 ## 2 进程

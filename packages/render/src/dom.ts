@@ -1,11 +1,16 @@
 // DOM drawing of a display state, shared by the local overlay, the screenshot
 // result and the web viewer (spec 07 sections 2 to 5, requirement 09 section 3.1).
-import type { RectF } from '@sth/model';
+import { cacheKey, type RectF } from '@sth/model';
 import { fitText, type Measure } from './layout.ts';
 import type { DisplaySettings } from './settings.ts';
 import type { DisplayState, ParaState } from './state.ts';
 
 const CJK_TARGETS = ['zh', 'ja', 'ko'];
+
+/** Equal up to whitespace (translators re-space "a.exe -b" as "a.exe - b"). */
+function sameText(a: string, b: string): boolean {
+  return cacheKey(a).replace(/\s+/g, '') === cacheKey(b).replace(/\s+/g, '');
+}
 
 export interface RenderView {
   /** Drawing area in CSS pixels; relative coordinates map onto it. */
@@ -107,6 +112,8 @@ export class DomRenderer {
     entries.forEach(([key, p], i) => {
       const shown = p.show;
       if (!shown) return; // nothing to draw yet, or no translation needed
+      // a translation identical to the original (file names, codes) would only hide it
+      if (shown.show === 'text' && shown.final && sameText(shown.text ?? '', p.add.text)) return;
       keep.add(key);
       const d = this.node(key);
       const box = boxes[i];

@@ -491,7 +491,11 @@ export class Run implements RaceSink {
       const u = (this.current ?? this.last)?.units.find((x) => x.paragraph_id === r.paragraphId);
       if (u) this.cache.put(u.text, r.shownText);
     }
-    this.details.push({ kind: 'race_end', batch_seq: r.batchSeq, paragraph_id: r.paragraphId, node_id: r.raceNode, reason: `${state} by ${r.endedBy}` });
+    // which source's text stayed and how each source ended; never the texts (spec 02 section 9.3)
+    const rec = r.record();
+    const shown = rec.shown_candidate ? `; shown rank ${rec.shown_candidate.rank} (${rec.shown_candidate.source})` : '';
+    const sources = Object.entries(rec.sources).map(([k, v]) => `${k}=${v.state}`).join(', ');
+    this.details.push({ kind: 'race_end', batch_seq: r.batchSeq, paragraph_id: r.paragraphId, node_id: r.raceNode, reason: `${state} by ${r.endedBy}${shown}; ${sources}` });
     const ctx = this.ctxOf(r);
     if (ctx) {
       ctx.pending.delete(r.paragraphId);

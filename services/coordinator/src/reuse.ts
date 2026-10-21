@@ -121,28 +121,34 @@ function consistentShift(rects: Rect[], map: ChangeMap, tiles: Tiles): number | 
   return null;
 }
 
-/** 4.5 step 2: first shift under which the in-frame part of every rect is consistent. */
-function partialShift(rects: Rect[], map: ChangeMap, tiles: Tiles): number | null {
+/**
+ * 4.5 step 2, per line: the first shift under which the in-frame part of this line is
+ * consistent. Locating lines one by one (rather than requiring one shift for all lines)
+ * also covers content scrolled under a fixed header: the hidden line is still inside
+ * the frame but no longer consistent, while the visible lines must still be found.
+ */
+function partialShiftOne(r: Rect, map: ChangeMap, tiles: Tiles): number | null {
+  // Locating only decides what to re-OCR, so a majority of consistent tiles is enough:
+  // descenders of a neighbouring line can make one or two tiles inconsistent under every shift.
+  let best: number | null = null;
+  let bestRatio = 0.5;
   for (let k = 0; k < map.shifts.length; k++) {
     const { dx, dy } = map.shifts[k];
-    let ok = true;
-    for (const r of rects) {
-      const R = clip(shiftRect(r, dx, dy), tiles.W, tiles.H);
-      if (!R) {
-        ok = false;
-        break;
-      }
-      for (const [u, v] of tiles.tilesOf(R)) {
-        if (!tiles.bit(k, u, v)) {
-          ok = false;
-          break;
-        }
-      }
-      if (!ok) break;
+    const R = clip(shiftRect(r, dx, dy), tiles.W, tiles.H);
+    if (!R) continue;
+    let ok = 0;
+    let all = 0;
+    for (const [u, v] of tiles.tilesOf(R)) {
+      all++;
+      if (tiles.bit(k, u, v)) ok++;
     }
-    if (ok) return k;
+    const ratio = all ? ok / all : 0;
+    if (ratio > bestRatio || (ratio === 1 && bestRatio < 1)) {
+      best = k;
+      bestRatio = ratio;
+    }
   }
-  return null;
+  return best;
 }
 
 /** Changed tiles dilated by r tiles (Chebyshev), as a set of v * cols + u. */
@@ -287,18 +293,20 @@ export function planReuse(
       if (k === 0) held.push(para);
       continue;
     }
-    const k2 = partialShift(rects, map, tiles);
-    if (k2 !== null) {
-      const { dx, dy } = map.shifts[k2];
-      for (const x of rects) {
-        const c = clip(shiftRect(x, dx, dy), W, H);
-        if (c) positions.push(c);
+    // not consistent as a whole: locate each line's visible part (held only if nothing moved)
+    let inPlace = true;
+    for (const x of rects) {
+      const k2 = partialShiftOne(x, map, tiles);
+      if (k2 === null) {
+        positions.push(x);
+        continue;
       }
-      if (k2 === 0) held.push(para);
-    } else {
-      positions.push(...rects);
-      held.push(para);
+      if (k2 !== 0) inPlace = false;
+      const { dx, dy } = map.shifts[k2];
+      const c = clip(shiftRect(x, dx, dy), W, H);
+      if (c) positions.push(c);
     }
+    if (inPlace) held.push(para);
   }
   const regions = mergeRegions([...changedComponents(map, W, H), ...positions], p.ocrMarginPx, W, H);
   return { full: false, reused, held, regions };

@@ -64,6 +64,9 @@ const SWP_NOMOVE = 0x0002;
 const SWP_NOACTIVATE = 0x0010;
 const GWL_EXSTYLE = -20;
 const WS_EX_TOOLWINDOW = 0x00000080;
+const WS_EX_TOPMOST = 0x00000008;
+const HWND_TOPMOST = -1;
+const HWND_NOTOPMOST = -2;
 const WS_EX_NOACTIVATE = 0x08000000;
 const DWMWA_EXTENDED_FRAME_BOUNDS = 9;
 
@@ -121,13 +124,33 @@ export function topWindowAt(x: number, y: number): number {
   return h ? Number(GetAncestor(h, GA_ROOT)) : 0;
 }
 
-/** Place `hwnd` directly above `target` in the z-order (spec 12 section 3.3). */
+function isTopmost(hwnd: number): boolean {
+  return (Number(GetWindowLongPtrW(hwnd, GWL_EXSTYLE)) & WS_EX_TOPMOST) !== 0;
+}
+
+/**
+ * Place `hwnd` directly above `target` in the z-order (spec 12 section 3.3).
+ *
+ * A background process cannot raise a window with HWND_TOP (the call succeeds and does
+ * nothing), but it can lower one by inserting it after another window, and it can make
+ * its own window topmost and back. So: when the target is the top window of the normal
+ * band (the one above it is topmost), our window goes topmost and then HWND_NOTOPMOST,
+ * which puts it at the top of the normal band; otherwise it is inserted after the window
+ * above the target. Inserting after a topmost window would make ours topmost and draw it
+ * over unrelated dialogs and overlays.
+ */
 export function placeAbove(hwnd: number, target: number): void {
   const prev = Number(GetWindow(target, GW_HWNDPREV));
-  if (prev === hwnd) return;
-  // hWndInsertAfter is the window that will precede ours: the one currently above the target
-  const after = prev || 0; // 0 = HWND_TOP
-  SetWindowPos(hwnd, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (prev === hwnd && !isTopmost(hwnd)) return;
+  const flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+  if (isTopmost(target)) {
+    SetWindowPos(hwnd, prev && prev !== hwnd ? prev : HWND_TOPMOST, 0, 0, 0, 0, flags);
+  } else if (!prev || prev === hwnd || isTopmost(prev)) {
+    if (!isTopmost(hwnd)) SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+  } else {
+    SetWindowPos(hwnd, prev, 0, 0, 0, 0, flags);
+  }
 }
 
 /** Tool window (not in the taskbar or Alt+Tab) that never activates. */

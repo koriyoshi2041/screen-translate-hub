@@ -11,7 +11,7 @@ import { join, resolve } from 'node:path';
 import { CardService } from './card.ts';
 import { OverlayManager, type WindowEnv } from './overlay.ts';
 import { selectRegion, type PhysicalRect } from './select.ts';
-import { SettingsStore, workflows, type Settings } from './settings.ts';
+import { SettingsStore, workflows, type Patch, type Settings } from './settings.ts';
 import * as win32 from './win32.ts';
 
 app.setName('screen-translate-hub');
@@ -199,7 +199,7 @@ function openSettings(): void {
   void settingsWin.loadFile(join(env.rendererDir, 'settings.html'));
 }
 
-ipcMain.handle('sth', async (_e, msg: { kind: string; patch?: Partial<Settings> }) => {
+ipcMain.handle('sth', async (_e, msg: { kind: string; patch?: Patch<Settings> }) => {
   if (msg.kind === 'get-settings') return store.value;
   if (msg.kind === 'save-settings' && msg.patch) {
     const before = JSON.stringify(store.value.translators) + JSON.stringify(store.value.viewer);
@@ -242,7 +242,7 @@ function startDevControl(): void {
         else if (a.action === 'continuous-toggle') await toggleContinuous();
         else if (a.action === 'state') out = { continuous: continuous?.status ?? null, services: agent.list().map((r) => r.manifest.name), settings: store.value };
         else if (a.action === 'settings') {
-          store.update(a.patch as Partial<Settings>);
+          store.update(a.patch as Patch<Settings>);
           overlay.applySettings(store.value.display);
         } else if (a.action === 'details' && continuous) out = await launcher.details(continuous.id);
         else if (a.action === 'dismiss') cards.dismissInPlace();
@@ -250,7 +250,15 @@ function startDevControl(): void {
         else if (a.action === 'win-info') {
           const hosts = [...overlay.hosts(), ...cards.hosts()].map((h) => ({ kind: 'overlay-host', ...win32.windowInfo(h.hwnd), affinity: win32.displayAffinity(h.hwnd) }));
           const wins = BrowserWindow.getAllWindows().map((w) => ({ title: w.getTitle(), url: w.webContents.getURL().split('/').pop(), ...win32.windowInfo(win32.hwndOf(w.getNativeWindowHandle())) }));
-          out = { hosts, windows: wins };
+          const fg = win32.foregroundWindow();
+          const cursor = win32.cursorPos();
+          const under = win32.topWindowAt(cursor.x, cursor.y);
+          out = {
+            hosts,
+            windows: wins,
+            foreground: { hwnd: fg, title: win32.windowTitle(fg), ...win32.windowInfo(fg) },
+            cursor: { ...cursor, window: under, title: win32.windowTitle(under) },
+          };
         } else if (a.action === 'desktop-shot') {
           // through our own capture service; overlays show up only with --debug-capturable
           const peer = await capturePeer();

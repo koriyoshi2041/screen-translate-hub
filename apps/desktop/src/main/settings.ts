@@ -62,16 +62,7 @@ export class SettingsStore {
     const base = defaults();
     if (existsSync(this.file)) {
       try {
-        const saved = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<Settings>;
-        this.value = {
-          ...base,
-          ...saved,
-          display: { ...base.display, ...(saved.display ?? {}) },
-          continuous: { ...base.continuous, ...(saved.continuous ?? {}) },
-          viewer: { ...base.viewer, ...(saved.viewer ?? {}) },
-          hotkeys: { ...base.hotkeys, ...(saved.hotkeys ?? {}) },
-          assistant: { ...base.assistant, ...(saved.assistant ?? {}) },
-        };
+        this.value = merge(base, JSON.parse(readFileSync(this.file, 'utf8')) as Patch<Settings>);
       } catch {
         this.value = base;
       }
@@ -85,11 +76,27 @@ export class SettingsStore {
     writeFileSync(this.file, JSON.stringify(this.value, null, 2));
   }
 
-  update(patch: Partial<Settings>): Settings {
-    this.value = { ...this.value, ...patch };
+  update(patch: Patch<Settings>): Settings {
+    this.value = merge(this.value, patch);
     this.save();
     return this.value;
   }
+}
+
+export type Patch<T> = { [K in keyof T]?: T[K] extends unknown[] ? T[K] : T[K] extends object ? Patch<T[K]> : T[K] };
+
+function isPlain(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Nested objects merge key by key; arrays and other values replace. */
+function merge<T>(base: T, patch: Patch<T>): T {
+  const out = { ...base } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(patch as Record<string, unknown>)) {
+    if (v === undefined) continue;
+    out[k] = isPlain(v) && isPlain(out[k]) ? merge(out[k], v) : v;
+  }
+  return out as T;
 }
 
 /**

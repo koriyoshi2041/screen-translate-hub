@@ -72,9 +72,16 @@ export class CardService {
     const width = Math.max(240, Math.round((img?.width ?? 480) * scale));
     const height = Math.max(120, Math.round((img?.height ?? 300) * scale)) + 30;
     const anchor = start.anchor ? screen.screenToDipPoint(start.anchor) : screen.getCursorScreenPoint();
+    // below the selection when it fits; otherwise above it, and always inside the work area
+    const area = screen.getDisplayNearestPoint(anchor).workArea;
+    const geom = start.image?.geometry;
+    let y = anchor.y;
+    if (y + height > area.y + area.height && geom) y = screen.screenToDipPoint({ x: geom.origin_x, y: geom.origin_y }).y - height - 8;
+    y = Math.max(area.y, Math.min(y, area.y + area.height - height));
+    const x = Math.max(area.x, Math.min(anchor.x, area.x + area.width - width));
     const win = new BrowserWindow({
-      x: Math.round(anchor.x),
-      y: Math.round(anchor.y),
+      x: Math.round(x),
+      y: Math.round(y),
       width,
       height,
       frame: false,

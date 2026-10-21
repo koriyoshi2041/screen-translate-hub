@@ -1,5 +1,6 @@
 // One run (spec 04 sections 2, 3, 8, 9, 11).
 import {
+  hasWords,
   sameLanguage,
   toRelativeQuad,
   toRelativeRect,
@@ -383,6 +384,11 @@ export class Run implements RaceSink {
         statuses.set(u.paragraph_id, true);
         continue;
       }
+      if (!hasWords(u.text)) {
+        this.endWithout(u.paragraph_id, 'no_words');
+        statuses.set(u.paragraph_id, true);
+        continue;
+      }
       if (sameLanguage(u.language, race.targetLanguage)) {
         this.endWithout(u.paragraph_id, 'same_language');
         statuses.set(u.paragraph_id, true);
@@ -454,7 +460,7 @@ export class Run implements RaceSink {
 
   private endWithout(pid: number, via: Via): void {
     this.hub.emit({ kind: 'paragraph_end', paragraph_id: pid, end_state: 'complete', via });
-    this.details.push({ kind: via === 'cache' ? 'cache_hit' : 'same_language', batch_seq: this.batchSeq, paragraph_id: pid });
+    this.details.push({ kind: via === 'cache' ? 'cache_hit' : via, batch_seq: this.batchSeq, paragraph_id: pid });
   }
 
   private contextBefore(ctx: BatchCtx, pid: number, n: number): string[] {

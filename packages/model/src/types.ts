@@ -94,8 +94,8 @@ export interface Candidate {
 }
 
 export type EndState = 'complete' | 'partial' | 'provisional' | 'error' | 'aborted';
-/** How the result came about; `same_language` is requirement 09 section 3.2. */
-export type Via = 'race' | 'reuse' | 'cache' | 'same_language';
+/** How the result came about; `same_language` and `no_words` are requirement 09 section 3.2. */
+export type Via = 'race' | 'reuse' | 'cache' | 'same_language' | 'no_words';
 export type EndedBy = 'settled' | 'all_ended' | 'deadline' | 'pause' | 'stop' | 'cancel';
 export type SourceState = 'queued' | 'running' | 'finished' | 'failed' | 'unavailable' | 'cancelled' | 'pruned';
 

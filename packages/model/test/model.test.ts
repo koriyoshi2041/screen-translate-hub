@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cacheKey, iou, orderQuad, pxRect, sameLanguage, supports, type Quad } from '../src/index.ts';
+import { cacheKey, hasWords, iou, orderQuad, pxRect, sameLanguage, supports, type Quad } from '../src/index.ts';
 
 test('orderQuad starts at min x+y and goes clockwise on screen', () => {
   const q = orderQuad([
@@ -40,6 +40,11 @@ test('same language (requirement 09 section 3.2)', () => {
   assert.ok(!sameLanguage('zh-Hant', 'zh-Hans'));
   assert.ok(!sameLanguage('ja', 'zh-Hans'));
   assert.ok(!sameLanguage(undefined, 'en'));
+});
+
+test('hasWords skips numbers, symbols and lone letters', () => {
+  for (const t of ['B', 'I', 'H1 √', '++', '2026/10/21', '14:37', 'M365', '×', ')', '']) assert.ok(!hasWords(t), t);
+  for (const t of ['OK', 'File', 'sample.txt', '自', 'Unknown Hard Error', 'Привет']) assert.ok(hasWords(t), t);
 });
 
 test('cache key examples from spec 02 section 8', () => {

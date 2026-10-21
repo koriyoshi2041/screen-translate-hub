@@ -53,6 +53,24 @@ export function cacheKey(text: string): string {
   return out;
 }
 
+/**
+ * Whether a paragraph has words worth translating (requirement 09 section 3.2): text
+ * without letters (numbers, times, symbols, icons read as punctuation) and lone Latin,
+ * Greek or Cyrillic letters (toolbar glyphs like B, I, X, H1) do not.
+ */
+export function hasWords(text: string): boolean {
+  let run = 0;
+  for (const ch of text) {
+    if (!/\p{L}/u.test(ch)) {
+      run = 0;
+      continue;
+    }
+    if (!/[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u.test(ch)) return true; // a caseless script letter is a word on its own
+    if (++run >= 2) return true;
+  }
+  return false;
+}
+
 /** Count characters by script, ignoring digits, punctuation and spaces. */
 export function scriptHistogram(text: string): Map<Script, number> {
   const h = new Map<Script, number>();

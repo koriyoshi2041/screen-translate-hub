@@ -1,7 +1,7 @@
 // Settings of this computer (spec 12 section 5), stored in %APPDATA%\screen-translate-hub.
 import type { TranslatorConfig } from '@sth/agent-core';
 import { defaultSettings, type DisplaySettings } from '@sth/render';
-import { addSource, continuousTemplate, screenshotTemplate, type WorkflowDoc } from '@sth/workflow';
+import { addSource, continuousTemplate, screenshotTemplate, validate, type WorkflowDoc } from '@sth/workflow';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -116,7 +116,28 @@ function merge<T>(base: T, patch: Patch<T>): T {
  * configured translator is the template's local source (bundled.translate), the
  * others are added above it in the configured order (spec 03 section 8).
  */
-export function workflows(s: Settings): { screenshot: WorkflowDoc; continuous: WorkflowDoc } {
+export function workflows(s: Settings, dir?: string, onProblem?: (file: string, problem: string) => void): { screenshot: WorkflowDoc; continuous: WorkflowDoc } {
+  const built = defaultWorkflows(s);
+  if (!dir) return built;
+  // requirement 09 section 2: without the node editor, a workflow can be supplied as a JSON file
+  // (workflows/screenshot.json, workflows/continuous.json); an invalid file falls back to the default
+  for (const entry of ['screenshot', 'continuous'] as const) {
+    const file = join(dir, 'workflows', `${entry}.json`);
+    if (!existsSync(file)) continue;
+    try {
+      const doc = JSON.parse(readFileSync(file, 'utf8')) as WorkflowDoc;
+      const problems = validate(doc);
+      if (doc.entry !== entry) problems.push({ rule: 0, message: `entry is ${doc.entry}, expected ${entry}` });
+      if (problems.length) onProblem?.(file, problems.map((p) => p.message).join('; '));
+      else built[entry] = doc;
+    } catch (err) {
+      onProblem?.(file, (err as Error).message);
+    }
+  }
+  return built;
+}
+
+function defaultWorkflows(s: Settings): { screenshot: WorkflowDoc; continuous: WorkflowDoc } {
   const build = (doc: WorkflowDoc): WorkflowDoc => {
     let d = doc;
     const extra = s.translators.slice(0, -1);

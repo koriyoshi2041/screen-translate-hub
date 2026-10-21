@@ -1,9 +1,9 @@
 // Desktop agent entry (spec 12 section 2): tray, hotkeys, settings, the agent
 // core with its local services, and the system integration services.
-import { AgentCore, catalog, RunLauncher, type RunHandle } from '@sth/agent-core';
+import { AgentCore, catalog, HistoryStore, RunLauncher, type HistoryEntry, type RunHandle } from '@sth/agent-core';
 import type { CaptureRange, Image } from '@sth/model';
 import { connect, Peer } from '@sth/wire';
-import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeImage, Notification, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeImage, Notification, shell, Tray } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -34,6 +34,7 @@ let launcher: RunLauncher;
 let overlay: OverlayManager;
 let cards: CardService;
 let assistant: AssistantCard;
+let history: HistoryStore;
 let tray: Tray | null = null;
 let continuous: RunHandle | null = null;
 let settingsWin: BrowserWindow | null = null;
@@ -100,9 +101,14 @@ async function grab(target: Record<string, unknown>): Promise<Image> {
 
 // ---------------- entries ----------------
 
+/** The two entries' workflows: from the settings, or from workflows/*.json in the data folder. */
+function currentWorkflows() {
+  return workflows(store.value, store.dir, (file, problem) => notify('Workflow file ignored', `${file}: ${problem}`));
+}
+
 async function screenshotRegion(rect: PhysicalRect): Promise<RunHandle> {
   const image = await grab({ region: rect });
-  return launcher.start(workflows(store.value).screenshot, { image, anchor: { x: rect.x, y: rect.y + rect.h + 8 } });
+  return launcher.start(currentWorkflows().screenshot, { image, anchor: { x: rect.x, y: rect.y + rect.h + 8 } });
 }
 
 async function startScreenshot(): Promise<void> {
@@ -110,7 +116,7 @@ async function startScreenshot(): Promise<void> {
   const sel = await selectRegion(env, () => grab({}));
   if (!sel) return;
   const { rect, image } = sel;
-  const run = await launcher.start(workflows(store.value).screenshot, { image, anchor: { x: rect.x, y: rect.y + rect.h + 8 } });
+  const run = await launcher.start(currentWorkflows().screenshot, { image, anchor: { x: rect.x, y: rect.y + rect.h + 8 } });
   const st = await run.finished;
   if (st.state === 'failed') notify('Screenshot translation failed', run.preflight?.problem ?? st.reason ?? '');
 }
@@ -128,7 +134,7 @@ function rangeFor(mode: Settings['continuous']['range']): { range: CaptureRange;
 async function startContinuous(mode = store.value.continuous.range): Promise<void> {
   if (continuous?.active) return;
   const { range, label } = rangeFor(mode);
-  continuous = await launcher.start(workflows(store.value).continuous, { continuous_range: range, range_label: label });
+  continuous = await launcher.start(currentWorkflows().continuous, { continuous_range: range, range_label: label });
   continuous.onStatus(() => refreshTray());
   void continuous.finished.then((st) => {
     if (st.state === 'failed') notify('Continuous translation failed', continuous?.preflight?.problem ?? st.reason ?? '');
@@ -213,6 +219,7 @@ function refreshTray(): void {
         : []),
       { type: 'separator' },
       { label: 'Settings...', click: () => openSettings() },
+      { label: 'Open history folder', click: () => void shell.openPath(history.dir) },
       { label: 'Quit', click: () => app.quit() },
     ]),
   );
@@ -397,9 +404,15 @@ app.on('will-quit', () => {
 
 void app.whenReady().then(async () => {
   store = new SettingsStore(join(app.getPath('appData'), 'screen-translate-hub'));
+  history = new HistoryStore(join(store.dir, 'history'), (img) =>
+    img.format === 'raw_bgra8' ? { data: nativeImage.createFromBitmap(Buffer.from(img.data), { width: img.width, height: img.height }).toJPEG(85), ext: 'jpg' } : null,
+  );
   agent = new AgentCore({
     logDir: join(store.dir, 'logs'),
-    hooks: { notify: (_kind, text) => notify('screen-translate-hub', text) },
+    hooks: {
+      notify: (_kind, text) => notify('screen-translate-hub', text),
+      saveHistory: async (entry) => history.save(entry as HistoryEntry).id,
+    },
   });
   defineServices(store.value);
   overlay = new OverlayManager(env);

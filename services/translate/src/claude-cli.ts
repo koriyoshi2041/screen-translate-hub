@@ -68,6 +68,8 @@ export class ClaudeCliEngine implements TranslateEngine {
       '--no-session-persistence',
       '--strict-mcp-config',
       '--disable-slash-commands',
+      // stream-json input waits for the prompt indefinitely; plain stdin gives up after 3 s
+      '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--include-partial-messages',
       '--verbose',
@@ -131,7 +133,8 @@ export class ClaudeCliEngine implements TranslateEngine {
         }
       }
     });
-    w.proc.stdin?.end(user);
+    // one user message, then end the input so the process exits after this turn
+    w.proc.stdin?.end(`${JSON.stringify({ type: 'user', message: { role: 'user', content: user } })}\n`);
     const code = await w.exited;
     signal.removeEventListener('abort', onAbort);
     await chain;

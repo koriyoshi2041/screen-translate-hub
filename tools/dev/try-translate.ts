@@ -7,6 +7,7 @@ const config = JSON.parse(process.argv[2] ?? '{"engine":"mock"}') as Record<stri
 const mode = (process.argv[3] ?? 'stream') as 'stream' | 'complete';
 const token = 'dev';
 const engine = await createEngine(config);
+if (process.env.STH_DELAY) await new Promise((r) => setTimeout(r, Number(process.env.STH_DELAY)));
 const server = await listen({ token, onConnection: (c) => translateHost('translate.dev', engine).attach(c) });
 const conn = await connect(server.url, { token, peer: 'dev' });
 const peer = new Peer(conn, 'translate.dev');

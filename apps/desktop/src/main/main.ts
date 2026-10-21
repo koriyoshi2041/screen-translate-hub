@@ -350,6 +350,10 @@ function startDevControl(): void {
         } else if (a.action === 'assistant') {
           if (a.text) await assistant.ask(String(a.text));
           else await assistant.summon();
+        } else if (a.action === 'interactive') {
+          out = { interactive: overlay.toggleInteractive() };
+        } else if (a.action === 'overlay-toggle') {
+          out = { visible: overlay.toggleVisible() };
         } else if (a.action === 'assistant-stop') {
           assistant.close();
         } else if (a.action === 'assistant-card') {

@@ -3,7 +3,7 @@
 //   node tools/dev/ctl.ts screenshot 100 100 800 400
 //   node tools/dev/ctl.ts continuous-start [display|follow_active_window|window_under_cursor]
 //   node tools/dev/ctl.ts continuous-stop | details | dismiss | overlay-shots | viewer-link
-//   node tools/dev/ctl.ts sharing on|off
+//   node tools/dev/ctl.ts sharing on|off | interactive | overlay-toggle
 //   node tools/dev/ctl.ts assistant [message]    (opens the AI card; with a message, sends it)
 //   node tools/dev/ctl.ts assistant-card          (the card's state, status line and log)
 //   node tools/dev/ctl.ts settings '{"display":{"mode":"dim"}}'   (or @patch.json from PowerShell)

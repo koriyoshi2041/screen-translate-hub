@@ -21,6 +21,8 @@ function Stop-App {
   }
   Unregister-ScheduledTask -TaskName 'sth-desktop' -Confirm:$false -ErrorAction SilentlyContinue
   Remove-Item (Join-Path $env:APPDATA 'screen-translate-hub\dev-control.json') -ErrorAction SilentlyContinue
+  # a new instance started before the old one is gone loses the single-instance lock and quits
+  for ($i = 0; $i -lt 40 -and @(Get-Process electron -ErrorAction SilentlyContinue).Count -gt 0; $i++) { Start-Sleep -Milliseconds 250 }
 }
 
 function Build-App {

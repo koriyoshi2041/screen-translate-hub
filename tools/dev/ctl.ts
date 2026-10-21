@@ -2,7 +2,8 @@
 //   node tools/dev/ctl.ts state
 //   node tools/dev/ctl.ts screenshot 100 100 800 400
 //   node tools/dev/ctl.ts continuous-start [display|follow_active_window|window_under_cursor]
-//   node tools/dev/ctl.ts continuous-stop | details | dismiss | overlay-shots
+//   node tools/dev/ctl.ts continuous-stop | details | dismiss | overlay-shots | viewer-link
+//   node tools/dev/ctl.ts sharing on|off
 //   node tools/dev/ctl.ts settings '{"display":{"mode":"dim"}}'   (or @patch.json from PowerShell)
 //   node tools/dev/ctl.ts overlay-eval "document.body.innerHTML.length" [host index]
 import { readFileSync } from 'node:fs';
@@ -15,6 +16,7 @@ if (action === 'screenshot') {
   const [x, y, w, h] = rest.map(Number);
   body.rect = { x, y, w, h };
 } else if (action === 'continuous-start') body.mode = rest[0] ?? 'display';
+else if (action === 'sharing') body.on = rest[0] !== 'off';
 // '@file' reads the argument from a file (Windows PowerShell 5.1 strips quotes inside arguments)
 const dropBom = (s: string) => (s.charCodeAt(0) === 0xfeff ? s.slice(1) : s);
 const arg = (s: string) => (s.startsWith('@') ? dropBom(readFileSync(s.slice(1), 'utf8')) : s);

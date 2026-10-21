@@ -6,7 +6,7 @@ screen-translate-hub 是一个自部署的屏幕翻译与 AI 平台。Windows �
 
 ## 当前阶段
 
-第一版（Windows 单机版）已经实现并在真实桌面上跑通，范围见 [第一版范围](docs/requirements/09-v1-scope.md)，实现方式见 [第一版实现](docs/spec/18-v1-implementation.md)，开发中的决定和实测结果记在 [开发记录](docs/dev-log.md)。第一版包括：
+第一版（Windows 单机版）已经实现并在真实桌面上跑通，范围见 [第一版范围](docs/requirements/09-v1-scope.md)，实现方式见 [第一版实现](docs/spec/18-v1-implementation.md)，开发中的决定和实测结果记在 [开发记录](docs/dev-log.md)，交付说明见 [方案说明](docs/proposal.md)。第一版包括：
 
 - 单次截图翻译（画在原位或截图浮卡）和持续屏幕翻译（整屏、跟随活动窗口、指针下的窗口），变化检测、段落复用、译文缓存；
 - 多翻译源竞速：Claude Code 无头模式、兼容 OpenAI 的接口、Anthropic 接口、Bergamot 离线翻译（Firefox 的引擎和模型）、模拟翻译源；

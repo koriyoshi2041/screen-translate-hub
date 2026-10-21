@@ -12,6 +12,19 @@ export interface WindowEnv {
   settings: () => import('@sth/render').DisplaySettings;
 }
 
+/**
+ * A topmost window covering a whole monitor makes the shell treat it as a full-screen
+ * app and drop the taskbar behind other windows (seen on the dev machine). Overlays
+ * therefore stay one pixel short of a monitor; the lost bottom row holds nothing to read.
+ */
+function avoidFullscreen(b: Physical): Physical {
+  for (const d of screen.getAllDisplays()) {
+    const r = screen.dipToScreenRect(null, d.bounds);
+    if (b.x <= r.x && b.y <= r.y && b.x + b.w >= r.x + r.width && b.y + b.h >= r.y + r.height) return { ...b, h: b.h - 1 };
+  }
+  return b;
+}
+
 export class OverlayHost {
   readonly osr: BrowserWindow;
   readonly surface: LayeredSurface;
@@ -24,7 +37,8 @@ export class OverlayHost {
   readonly stats = { paints: 0, size: [0, 0], error: 0 };
   onClosed?: () => void;
 
-  constructor(env: WindowEnv, bounds: Physical, opts: { topmost: boolean; page?: string }) {
+  constructor(env: WindowEnv, requested: Physical, opts: { topmost: boolean; page?: string }) {
+    const bounds = avoidFullscreen(requested);
     this.bounds = { ...bounds };
     this.surface = new LayeredSurface(bounds, { topmost: opts.topmost, excludeFromCapture: !env.debugCapturable });
     const scale = screen.getPrimaryDisplay().scaleFactor || 1;
@@ -49,6 +63,8 @@ export class OverlayHost {
     this.ready = new Promise((r) => this.osr.webContents.once('did-finish-load', () => r()));
     void this.osr.loadFile(join(env.rendererDir, opts.page ?? 'overlay.html'));
     void this.ready.then(() => {
+      // the page starts clamped to the work area (display minus taskbar); size it again once loaded
+      this.resizePage();
       if (!this.hiddenByUser) this.surface.show();
     });
   }
@@ -74,15 +90,19 @@ export class OverlayHost {
     void this.ready.then(() => !this.closed && this.osr.webContents.send('sth', msg));
   }
 
-  setBounds(b: Physical): void {
+  setBounds(requested: Physical): void {
     if (this.closed) return;
+    const b = avoidFullscreen(requested);
     const resized = b.w !== this.bounds.w || b.h !== this.bounds.h;
     this.bounds = { ...b };
     this.surface.setBounds(b);
-    if (resized) {
-      const scale = screen.getPrimaryDisplay().scaleFactor || 1;
-      this.osr.setSize(Math.max(1, Math.round(b.w / scale)), Math.max(1, Math.round(b.h / scale)));
-    }
+    if (resized) this.resizePage();
+  }
+
+  private resizePage(): void {
+    if (this.closed) return;
+    const scale = screen.getPrimaryDisplay().scaleFactor || 1;
+    this.osr.setContentSize(Math.max(1, Math.round(this.bounds.w / scale)), Math.max(1, Math.round(this.bounds.h / scale)));
   }
 
   show(): void {

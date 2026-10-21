@@ -28,6 +28,15 @@ export function pythonPath(root: string): string {
   return existsSync(venv) ? venv : 'python';
 }
 
+/**
+ * An outbound proxy for one service (requirement 09 section 2: external AI services can
+ * use their own proxy). Node 24's fetch follows these variables when NODE_USE_ENV_PROXY is set.
+ */
+export function proxyEnv(proxy: unknown): Record<string, string> | undefined {
+  if (typeof proxy !== 'string' || !proxy) return undefined;
+  return { NODE_USE_ENV_PROXY: '1', HTTPS_PROXY: proxy, HTTP_PROXY: proxy, NO_PROXY: '127.0.0.1,localhost' };
+}
+
 export function catalog(o: CatalogOptions): ServiceSpec[] {
   const node = o.node ?? process.execPath;
   const py = o.python ?? pythonPath(o.root);
@@ -46,10 +55,13 @@ export function catalog(o: CatalogOptions): ServiceSpec[] {
     { name: 'coordinator', command: node, args: ts('services/coordinator/src/main.ts'), cwd: o.root },
   ];
   for (const t of o.translators) {
-    const { name, ...config } = t;
-    specs.push({ name, command: node, args: ts('services/translate/src/main.ts'), cwd: o.root, config });
+    const { name, proxy, ...config } = t;
+    specs.push({ name, command: node, args: ts('services/translate/src/main.ts'), cwd: o.root, config, env: proxyEnv(proxy) });
   }
   if (o.viewer && existsSync(join(o.root, 'services/viewer/src/main.ts'))) specs.push({ name: 'viewer', command: node, args: ts('services/viewer/src/main.ts'), cwd: o.root, config: o.viewer });
-  if (o.assistant && existsSync(join(o.root, 'services/assistant/src/main.ts'))) specs.push({ name: 'assistant', command: node, args: ts('services/assistant/src/main.ts'), cwd: o.root, config: o.assistant });
+  if (o.assistant && existsSync(join(o.root, 'services/assistant/src/main.ts'))) {
+    const { proxy, ...config } = o.assistant;
+    specs.push({ name: 'assistant', command: node, args: ts('services/assistant/src/main.ts'), cwd: o.root, config, env: proxyEnv(proxy) });
+  }
   return specs;
 }

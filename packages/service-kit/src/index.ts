@@ -57,6 +57,8 @@ function stdinClosed(): Promise<void> {
 
 export interface ServeResult {
   url: string;
+  /** The agent, for services that call it (absent when running standalone). */
+  agent?: Peer;
   /** Resolves when the agent connection or stdin goes away. */
   finished: Promise<void>;
   close(): Promise<void>;
@@ -99,6 +101,7 @@ export async function serve(
   const finished = Promise.race([conn.closed.then(() => undefined), stdinClosed()]);
   return {
     url: server.url,
+    agent: new Peer(conn, 'agent'),
     finished,
     close: async () => {
       conn.close();

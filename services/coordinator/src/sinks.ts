@@ -50,8 +50,10 @@ export function cardSink(
 export function viewerSink(
   peer: Peer,
   start: { run_id: string; stream_id: string; device_id: string; range_label: string; target_language: string },
+  onEnded?: () => void,
 ): DisplaySink {
   const call = peer.open<unknown, unknown>('viewer', 'Publish', { deadlineMs: 0 });
+  void call.done.then(() => onEnded?.());
   return {
     async open(snapshot: DisplaySnapshot, frame?: { id: string; seq: number; image: Image }) {
       await call.send({ start });

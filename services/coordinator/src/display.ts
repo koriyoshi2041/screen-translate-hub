@@ -33,6 +33,10 @@ export class DisplayStream {
     return this.sink !== null;
   }
 
+  has(sink: DisplaySink): boolean {
+    return this.sink === sink;
+  }
+
   /** Attach a sink: it gets the current snapshot first (and the current frame), then live events. */
   attach(sink: DisplaySink): void {
     this.detach();

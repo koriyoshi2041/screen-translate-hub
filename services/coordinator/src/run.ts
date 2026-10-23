@@ -22,7 +22,7 @@ import { TranslationCache } from './cache.ts';
 import { CaptureClient, type CaptureBatch } from './capture-client.ts';
 import type { Clients } from './clients.ts';
 import { RunDetails } from './details.ts';
-import { DisplayHub } from './display.ts';
+import { DisplayHub, type DisplayStream } from './display.ts';
 import { SourceDispatcher } from './dispatch.ts';
 import { detectLanguage } from './langid.ts';
 import { compilePlan, PreflightError } from './plan.ts';
@@ -119,6 +119,9 @@ export class Run implements RaceSink {
   private last: BatchCtx | null = null;
   private resumeWaiters: Array<() => void> = [];
   private readonly noticeActive = new Set<string>();
+  /** Whether screen sharing is on (spec 05 requirement section 4.3), as last reported by the agent. */
+  private sharing = false;
+  private viewer: ResolvedService | null = null;
   private finished!: () => void;
   readonly ended = new Promise<void>((r) => (this.finished = r));
 
@@ -206,31 +209,53 @@ export class Run implements RaceSink {
     if (this.hub.byType('web_display').length) void this.watchSharing();
   }
 
+  private isOver(): boolean {
+    return this.state === 'stopped' || this.state === 'completed' || this.state === 'failed';
+  }
+
   /** Spec 05 requirement section 4.3: only send to the viewer while sharing is on. */
   private async watchSharing(): Promise<void> {
-    let viewer: ResolvedService | null = null;
     try {
       for await (const m of this.clients.agent.serverStream<unknown, { enabled: boolean }>('agent', 'WatchSharing', {}, { deadlineMs: 0 })) {
-        if (this.state === 'stopped' || this.state === 'completed' || this.state === 'failed') return;
+        if (this.isOver()) return;
+        this.sharing = m.enabled;
         for (const s of this.hub.byType('web_display')) {
-          if (m.enabled && !s.attached) {
-            viewer ??= await this.clients.acquire('viewer').catch(() => null);
-            if (!viewer) continue;
-            const peer = await this.clients.peer(viewer);
-            s.attach(viewerSink(peer, {
-              run_id: this.id,
-              stream_id: s.streamId,
-              device_id: this.start.device_id,
-              range_label: this.start.range_label ?? 'screen',
-              target_language: this.targetLanguage(),
-            }));
-          } else if (!m.enabled && s.attached) {
-            s.detach();
-          }
+          if (m.enabled && !s.attached) await this.publish(s);
+          else if (!m.enabled && s.attached) s.detach();
         }
       }
     } catch {
       // agent gone; the run ends separately
+    }
+  }
+
+  /** Publish a web display to the viewer. */
+  private async publish(s: DisplayStream): Promise<void> {
+    const wanted = () => this.sharing && !this.isOver() && !s.attached;
+    if (!wanted()) return;
+    this.viewer ??= await this.clients.acquire('viewer').catch(() => null);
+    const peer = this.viewer && (await this.clients.peer(this.viewer).catch(() => null));
+    if (!peer) {
+      this.viewer = null; // not running, or gone since it was acquired
+      return;
+    }
+    if (!wanted()) return;
+    const start = { run_id: this.id, stream_id: s.streamId, device_id: this.start.device_id, range_label: this.start.range_label ?? 'screen', target_language: this.targetLanguage() };
+    const sink = viewerSink(peer, start, () => {
+      // ended by sharing off or the run ending, or already replaced: nothing to do
+      if (!this.sharing || this.isOver() || (s.attached && !s.has(sink))) return;
+      s.detach();
+      void this.republish(s);
+    });
+    s.attach(sink);
+  }
+
+  /** The viewer went away (a crash; it is restarted on its own): publish again, same stream id, once it is back. */
+  private async republish(s: DisplayStream): Promise<void> {
+    this.viewer = null;
+    for (let i = 0; i < 30 && this.sharing && !this.isOver() && !s.attached; i++) {
+      await sleep(1_000);
+      await this.publish(s); // does nothing once sharing is off or the run is over
     }
   }
 

@@ -159,7 +159,7 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 | 文件 | 函数与类型 | 职责 |
 | --- | --- | --- |
 | `main.ts` | `main()` | 读启动信息，提供 `coordinator.Run`、`coordinator.GetRunDetails` |
-| `run.ts` | `class Run`：`prepare(): Promise<PreflightResult>`、`execute()`、`pause(reason)`、`resume()`、`stop(reason)`、`control(action)` | [运行协调器](04-run-coordinator.md) 第 2、8、9 节的状态机和控制 |
+| `run.ts` | `class Run`：`prepare(): Promise<PreflightResult>`、`execute()`、`pause(reason)`、`resume()`、`stop(reason)`、`control(action)` | [运行协调器](04-run-coordinator.md) 第 2、8、9 节的状态机和控制；共享开着时把网页显示发布到观看服务，观看服务重启后用同一来源编号重新发布 |
 | `plan.ts` | `compilePlan(doc, entry, resolver): Promise<ExecPlan>` | 冻结配置、解析绑定、运行前检查（[工作流定义](03-workflow.md) 6.3）；把工作流编译成执行计划 |
 | `continuous.ts` | `runContinuous(run, plan)` | 04 第 3.1 节的取批次循环 |
 | `batch.ts` | `processBatch(ctx, batch): Promise<BatchRecord>` | 04 第 3.2 节的一个批次 |
@@ -222,7 +222,7 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 
 | 文件 | 函数 | 职责 |
 | --- | --- | --- |
-| `service.py` | `main()` | 提供 `ocr.Recognize`（[服务接口](09-service-interfaces.md) 第 11 节） |
+| `service.py` | `main()` | 提供 `ocr.Recognize`（[服务接口](09-service-interfaces.md) 第 11 节）；图像的宽高与数据长度不符时回 `invalid_argument` |
 | `engine.py` | `class RapidOcrEngine`：`recognize(rgb, languages) -> list[TextBlock]` | 调用 RapidOCR，把结果转换为统一的文字块，点序按数据模型 1.2 |
 
 ## 13 services/viewer
@@ -234,7 +234,7 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 | `frames.ts` | `class FrameStore`：`get(id, width, dataSaver, format)`、`drop(ids)` | 按观看端宽度缩放（按 64 像素取整，只缩小不放大）并编码，同一画面、宽度、质量只编码一次 |
 | `http.ts` | `startHttp(opts)` | 观看页、`GET /frame/{image_id}`、`/ws` 上的浏览器 WebSocket；`GET /lockout` 只告诉请求方自己还要等几秒（锁定时 WebSocket 被拒，浏览器读不到原因） |
 | `web.ts` | `buildWeb()` | 服务启动时用 esbuild 在内存中打包观看页，发行版可以预先打包到 `web/dist` |
-| `web/` | 观看页 | 来源列表、画面与译文、段落面板、显示设置、列表布局；用 `@sth/render` 绘制 |
+| `web/` | 观看页 | 来源列表、画面与译文、段落面板、显示设置、列表布局；用 `@sth/render` 绘制。重新连上或来源恢复时重新订阅，新快照到来前保留原来的画面；列表布局也遵守"显示译文"（关掉时列出原文），只对画面起作用的设置在列表布局下隐藏 |
 
 第一版的做法：
 
@@ -271,7 +271,7 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 | 文件 | 函数与类型 | 职责 |
 | --- | --- | --- |
 | `agent.ts` | `class AgentCore`：`start()`、`provide(svc, iface, methods)`、`alias(name, target)`、`waitFor(name)`、`setSharing(on)`；`agent` 接口的 `Register`、`ListServices`、`Acquire`、`WatchSharing`、`Notify`、`SaveHistory` | 服务清单与转发（[服务接口](09-service-interfaces.md) 第 3 节） |
-| `supervisor.ts` | `class Supervisor`：`define(spec)`、`ensure(name)`、`stop(name)`、`stopAll()` | 按需启动（经标准输入传启动信息）、退避重启、连续崩溃 5 次后放弃；每个服务一个日志文件 |
+| `supervisor.ts` | `class Supervisor`：`define(spec)`、`ensure(name)`、`stop(name)`、`stopAll()` | 按需启动（经标准输入传启动信息）、退避重启、连续崩溃 5 次后放弃；没能启动的进程（命令或工作目录不存在，只有 `error` 没有 `exit`）同样按退出处理，问题修好后可以再次启动；每个服务一个日志文件 |
 | `catalog.ts` | `catalog(opts): ServiceSpec[]` | 第一版的服务清单 |
 | `runs.ts` | `class RunLauncher`：`start(doc, trigger): RunHandle`、`details(runId)` | 按工作流发起运行，跟踪状态，转发暂停、继续、停止和人工重试 |
 | `recording.ts` | `class RecordingDisplays` | 无界面运行时代替覆盖层和浮卡，记录收到的显示事件 |

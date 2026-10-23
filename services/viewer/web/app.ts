@@ -244,6 +244,8 @@ async function showFrame(ref: FrameRef | undefined): Promise<void> {
 
 let peer: Peer | null = null;
 let subAbort: AbortController | null = null;
+/** Whether `current` has a subscription open on this connection; it ends with the connection or when the source goes offline. */
+let subscribed = false;
 
 function resetState(): void {
   live = emptyState();
@@ -279,34 +281,40 @@ async function subscribe(src: SourceInfo): Promise<void> {
   subAbort?.abort();
   const ctl = new AbortController();
   subAbort = ctl;
+  subscribed = true;
+  // the same source again (reconnected, or back online): its last picture stays until the snapshot replaces it
+  if (current?.source_id !== src.source_id) resetState();
   current = src;
   offline = false;
-  resetState();
   setStatus('ok', sourceLabel(src));
   draw();
-  while (!ctl.signal.aborted && peer) {
-    let resync = false;
-    try {
-      for await (const m of peer.serverStream<{ source_id: string }, SubscribeReply>('viewer', 'Subscribe', { source_id: src.source_id }, { deadlineMs: 0, signal: ctl.signal })) {
-        if ('offline' in m) {
-          offline = true;
+  try {
+    while (!ctl.signal.aborted && peer) {
+      let resync = false;
+      try {
+        for await (const m of peer.serverStream<{ source_id: string }, SubscribeReply>('viewer', 'Subscribe', { source_id: src.source_id }, { deadlineMs: 0, signal: ctl.signal })) {
+          if ('offline' in m) {
+            offline = true;
+            draw();
+            return;
+          }
+          if ('snapshot' in m) {
+            live = fromSnapshot(m.snapshot);
+            frozen = null;
+            await showFrame(live.frame);
+          } else if ((await onEvent(m.event)) === 'resync') {
+            resync = true;
+            break;
+          }
           draw();
-          return;
         }
-        if ('snapshot' in m) {
-          live = fromSnapshot(m.snapshot);
-          frozen = null;
-          await showFrame(live.frame);
-        } else if ((await onEvent(m.event)) === 'resync') {
-          resync = true;
-          break;
-        }
-        draw();
+      } catch {
+        return; // cancelled, or the connection is gone (the session loop reconnects)
       }
-    } catch {
-      return; // cancelled, or the connection is gone (the session loop reconnects)
+      if (!resync) return;
     }
-    if (!resync) return;
+  } finally {
+    if (subAbort === ctl) subscribed = false;
   }
 }
 
@@ -324,6 +332,7 @@ function updateSources(list: SourceInfo[]): void {
   const still = current && list.find((s) => s.source_id === current!.source_id);
   if (still) {
     sourceSel.value = still.source_id;
+    if (!subscribed) void subscribe(still); // a new connection, or the source is back with the same id
     return;
   }
   if (list.length > 0) {
@@ -354,6 +363,7 @@ async function session(conn: Connection): Promise<void> {
     for await (const m of peer.serverStream<unknown, { sources: SourceInfo[] }>('viewer', 'ListSources', {}, { deadlineMs: 0 })) updateSources(m.sources);
   } finally {
     subAbort?.abort();
+    subscribed = false;
     peer = null;
   }
 }

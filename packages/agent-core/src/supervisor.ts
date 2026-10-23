@@ -17,7 +17,6 @@ export interface ServiceSpec {
 interface Proc {
   spec: ServiceSpec;
   child: ChildProcess | null;
-  starting: boolean;
   crashes: number[];
   stopped: boolean;
   log?: WriteStream;
@@ -63,46 +62,65 @@ export class Supervisor {
     if (!spec) throw new Error(`no service defined: ${name}`);
     let p = this.procs.get(name);
     if (!p) {
-      p = { spec, child: null, starting: false, crashes: [], stopped: false };
+      p = { spec, child: null, crashes: [], stopped: false };
       this.procs.set(name, p);
     }
-    if (p.child || p.starting) return;
+    if (p.child) return;
     p.stopped = false;
     this.launch(p);
   }
 
   private launch(p: Proc): void {
-    p.starting = true;
     const { spec } = p;
     p.log ??= createWriteStream(join(this.logDir, `${spec.name}.log`), { flags: 'a' });
-    const child = spawn(spec.command, spec.args, {
-      cwd: spec.cwd,
-      env: { ...process.env, PYTHONUTF8: '1', ...spec.env },
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
+    let child: ChildProcess;
+    try {
+      child = spawn(spec.command, spec.args, {
+        cwd: spec.cwd,
+        env: { ...process.env, PYTHONUTF8: '1', ...spec.env },
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+    } catch (e) {
+      p.log.write(`spawn error: ${(e as Error).message}\n`);
+      setImmediate(() => this.exited(p, null));
+      return;
+    }
     p.child = child;
-    p.starting = false;
+    // a process that never started (missing command or working directory) reports an
+    // error and no exit; either way the end is handled once (spec 12 section 1.2)
+    let ended = false;
+    const end = (code: number | null) => {
+      if (ended) return;
+      ended = true;
+      if (p.child === child) p.child = null;
+      this.exited(p, code);
+    };
     child.stdout?.pipe(p.log, { end: false });
     child.stderr?.pipe(p.log, { end: false });
+    child.stdin?.on('error', () => {}); // the process is gone; the error or exit event reports it
     child.stdin?.write(`${JSON.stringify({ agent: this.agentUrl(), token: this.token, name: spec.name, config: spec.config ?? {} })}\n`);
-    child.on('error', (e) => p.log?.write(`spawn error: ${e.message}\n`));
-    child.on('exit', (code) => {
-      p.child = null;
-      this.onExit?.(spec.name, code);
-      if (p.stopped) return;
-      // restart with backoff; give up after 5 crashes within 30 s of start (spec 12 section 1.2)
-      const now = Date.now();
-      p.crashes = [...p.crashes.filter((t) => now - t < 5 * 60_000), now];
-      if (p.crashes.length >= 5 && now - p.crashes[p.crashes.length - 5] < 5 * 30_000) {
-        p.log?.write(`giving up after repeated crashes\n`);
-        return;
-      }
-      const wait = BACKOFF_MS[Math.min(p.crashes.length - 1, BACKOFF_MS.length - 1)];
-      setTimeout(() => {
-        if (!p.stopped && !p.child) this.launch(p);
-      }, wait).unref();
+    child.on('error', (e) => {
+      p.log?.write(`spawn error: ${e.message}\n`);
+      if (child.pid === undefined) end(null);
     });
+    child.on('exit', (code) => end(code));
+  }
+
+  private exited(p: Proc, code: number | null): void {
+    this.onExit?.(p.spec.name, code);
+    if (p.stopped) return;
+    // restart with backoff; give up after 5 crashes within 30 s of start (spec 12 section 1.2)
+    const now = Date.now();
+    p.crashes = [...p.crashes.filter((t) => now - t < 5 * 60_000), now];
+    if (p.crashes.length >= 5 && now - p.crashes[p.crashes.length - 5] < 5 * 30_000) {
+      p.log?.write(`giving up after repeated crashes\n`);
+      return;
+    }
+    const wait = BACKOFF_MS[Math.min(p.crashes.length - 1, BACKOFF_MS.length - 1)];
+    setTimeout(() => {
+      if (!p.stopped && !p.child) this.launch(p);
+    }, wait).unref();
   }
 
   stop(name: string): void {

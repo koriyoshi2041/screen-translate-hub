@@ -99,7 +99,7 @@ export class DomRenderer {
 
     const notices = [...state.notices.values()];
     this.banner.style.display = notices.length ? 'block' : 'none';
-    this.banner.textContent = notices.map((n) => `Preferred translation source unavailable: ${n.reason}`).join(' / ');
+    this.banner.textContent = notices.map((n) => `Translation source unavailable: ${n.reason}`).join(' / ');
 
     const entries: Array<[string, ParaState]> = [
       ...[...state.held.entries()].map(([id, p]) => [`h${id}`, p] as [string, ParaState]),

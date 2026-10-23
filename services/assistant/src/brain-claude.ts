@@ -2,7 +2,7 @@
 // in stream-json mode, so the conversation carries over between wakes. Built-in tools
 // are off; the platform tools come in through this service's MCP server (mcp.ts).
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,23 @@ export interface ClaudeBrainConfig {
   token: string;
   sessionId: string;
   node?: string;
+}
+
+const DIR_PREFIX = 'sth-assistant-';
+
+/**
+ * Removes the directories of sessions that ended without close(), because the service was
+ * killed. They hold an MCP config with that service run's (now useless) session token.
+ */
+export function removeStaleDirs(): void {
+  for (const name of readdirSync(tmpdir())) {
+    if (!name.startsWith(DIR_PREFIX)) continue;
+    try {
+      rmSync(join(tmpdir(), name), { recursive: true, force: true });
+    } catch {
+      // still in use by a process that outlived its service: leave it
+    }
+  }
 }
 
 /** The text a wake sends as the user turn. */
@@ -68,7 +85,7 @@ export class ClaudeCodeBrain implements Brain {
 
   async open(task: string, _tools: PlatformTool[]): Promise<void> {
     this.task = task;
-    this.dir = mkdtempSync(join(tmpdir(), 'sth-assistant-'));
+    this.dir = mkdtempSync(join(tmpdir(), DIR_PREFIX));
     this.start();
   }
 

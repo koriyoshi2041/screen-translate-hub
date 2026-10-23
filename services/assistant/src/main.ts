@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { Clients, log, runService, serve } from '@sth/service-kit';
 import { ServiceHost, type Stream } from '@sth/wire';
-import { ClaudeCodeBrain } from './brain-claude.ts';
+import { ClaudeCodeBrain, removeStaleDirs } from './brain-claude.ts';
 import { PiBrain } from './brain-pi.ts';
 import { makeGate } from './gate.ts';
 import { Heartbeat } from './heartbeat.ts';
@@ -32,6 +32,8 @@ export interface AssistantConfig {
 
 void runService('assistant', async (boot) => {
   const cfg = boot.config as AssistantConfig;
+  // one assistant service at a time: what an earlier, killed run left behind is stale
+  removeStaleDirs();
   const sessions = new Map<string, AssistantSession>();
   let clients: Clients | null = null;
   let selfUrl = '';

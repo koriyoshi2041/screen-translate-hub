@@ -1,6 +1,7 @@
 // Local history (requirement 09 section 2: screenshot translations and assistant
 // conversations on this computer only, no capacity management or sync). One JSON file
-// per entry under history/YYYY-MM-DD; a screenshot's picture sits next to it.
+// per entry under history/YYYY-MM-DD; a screenshot's picture sits next to it. Folder and
+// file names use local time, as the user looks for them; the entries record UTC.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,6 +23,14 @@ export interface SavedEntry {
 /** Encodes a captured picture for the history folder; null to leave the picture out. */
 export type ImageEncoder = (img: EncodedImage) => { data: Uint8Array; ext: string } | null;
 
+function localNames(at: Date): { day: string; time: string } {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return {
+    day: `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}`,
+    time: `${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`,
+  };
+}
+
 export class HistoryStore {
   readonly dir: string;
   private readonly encode?: ImageEncoder;
@@ -34,10 +43,10 @@ export class HistoryStore {
   save(entry: HistoryEntry): SavedEntry {
     const at = new Date();
     const id = randomUUID();
-    const day = join(this.dir, at.toISOString().slice(0, 10));
+    const names = localNames(at);
+    const day = join(this.dir, names.day);
     mkdirSync(day, { recursive: true });
-    const stamp = at.toISOString().slice(11, 19).replace(/:/g, '');
-    const base = `${stamp}-${entry.kind}-${id.slice(0, 8)}`;
+    const base = `${names.time}-${entry.kind}-${id.slice(0, 8)}`;
     const { image, ...rest } = entry as HistoryEntry & { image?: Image };
     let imageFile: string | undefined;
     if (image?.image && this.encode) {

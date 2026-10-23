@@ -126,6 +126,10 @@ export function workflows(s: Settings, dir?: string, onProblem?: (file: string, 
     if (!existsSync(file)) continue;
     try {
       const doc = JSON.parse(readFileSync(file, 'utf8')) as WorkflowDoc;
+      if (!Array.isArray(doc?.nodes) || !Array.isArray(doc?.edges)) {
+        onProblem?.(file, 'not a workflow document: "nodes" and "edges" lists are required');
+        continue;
+      }
       const problems = validate(doc);
       if (doc.entry !== entry) problems.push({ rule: 0, message: `entry is ${doc.entry}, expected ${entry}` });
       if (problems.length) onProblem?.(file, problems.map((p) => p.message).join('; '));

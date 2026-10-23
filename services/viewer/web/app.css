@@ -31,9 +31,11 @@ select { font: inherit; color: var(--text); background: #2c3036; border: 1px sol
 
 #list { width: 100%; max-width: 760px; padding: 10px 12px 40px; }
 #list .item { padding: 10px 12px; margin-bottom: 8px; background: #1d2024; border-radius: 10px; }
-#list .tr { font-size: 17px; line-height: 1.5; white-space: pre-wrap; }
-#list .src { display: none; margin-top: 6px; color: var(--muted); font-size: 13px; white-space: pre-wrap; }
+#list .tr { font-size: calc(17px * var(--scale, 1)); line-height: 1.5; white-space: pre-wrap; }
+#list .src { display: none; margin-top: 6px; color: var(--muted); font-size: calc(13px * var(--scale, 1)); white-space: pre-wrap; }
 #list .item.open .src { display: block; }
+#list.originals .tr { display: none; }
+#list.originals .src { display: block; margin-top: 0; color: inherit; font-size: calc(17px * var(--scale, 1)); line-height: 1.5; }
 #list .err { color: var(--bad); }
 #list .pending { color: var(--muted); }
 #list .gone { margin: 8px 0; color: var(--warn); font-size: 13px; }
@@ -56,3 +58,4 @@ select { font: inherit; color: var(--text); background: #2c3036; border: 1px sol
 .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
 .range { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; }
 .range input { flex: 1; max-width: 60%; }
+#settings.list-layout .pic { display: none; }

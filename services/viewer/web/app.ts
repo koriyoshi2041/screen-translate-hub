@@ -161,13 +161,15 @@ function readingOrdered(s: DisplayState): Array<[string, ParaState]> {
 }
 
 function renderList(): void {
+  // with translations turned off the list reads the original text, like the picture does
+  const originals = !settings.show_translation;
   const keep = new Set<string>();
   const nodes: HTMLElement[] = [];
   for (const [key, p] of readingOrdered(shown())) {
     const show = p.show;
     // nothing to read: same language, no words, or a translation equal to the original
-    if (!show && p.end_state !== undefined) continue;
-    if (show?.show === 'text' && show.final && compact(show.text ?? '') === compact(p.add.text)) continue;
+    if (!originals && !show && p.end_state !== undefined) continue;
+    if (!originals && show?.show === 'text' && show.final && compact(show.text ?? '') === compact(p.add.text)) continue;
     let el = listItems.get(key);
     if (!el) {
       el = document.createElement('div');
@@ -192,6 +194,8 @@ function renderList(): void {
     g.textContent = 'This source is offline.';
     head.push(g);
   }
+  list.classList.toggle('originals', originals);
+  list.style.setProperty('--scale', String(settings.font_scale));
   list.replaceChildren(...head, ...nodes);
 }
 
@@ -455,6 +459,7 @@ function syncSettingsForm(): void {
   for (const r of radios('layout')) r.checked = r.value === prefs.layout;
   for (const r of radios('refresh')) r.checked = r.value === settings.refresh;
   for (const r of document.querySelectorAll<HTMLInputElement>('.seg input')) r.parentElement!.classList.toggle('on', r.checked);
+  settingsSheet.classList.toggle('list-layout', prefs.layout === 'list'); // hides the controls that only apply to the picture
   $<HTMLInputElement>('sShow').checked = settings.show_translation;
   $<HTMLInputElement>('sFrame').checked = settings.show_frame;
   $<HTMLInputElement>('sFont').value = String(settings.font_scale);

@@ -1,5 +1,6 @@
 // The viewing page in a real browser engine (Electron, offscreen): it follows its source
-// across a viewer restart and across the source going offline and coming back.
+// across a viewer restart and across the source going offline and coming back, and the
+// list layout honours "Show translation".
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -142,6 +143,10 @@ const TITLE = `document.getElementById('title').textContent`;
 const shows = (text: string, el = 'layer') => `document.getElementById('${el}').innerText.includes(${JSON.stringify(text)})`;
 const live = `${TITLE}.endsWith(${JSON.stringify(` · ${LABEL}`)}) && document.getElementById('dot').classList.contains('ok')`;
 
+/** Change the settings sheet like a tap does: the sheet listens for input events. */
+const setForm = (selector: string, checked: boolean) =>
+  `(() => { const i = document.querySelector(${JSON.stringify(selector)}); i.checked = ${checked}; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
+
 test('the page follows its source across a viewer restart and a source coming back', async () => {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
@@ -170,4 +175,32 @@ test('the page follows its source across a viewer restart and a source coming ba
   await retranslate(source, '共享恢复后继续收到的译文');
   await until(page, shows('共享恢复后继续收到的译文'), 'events after coming back');
   await until(page, live, 'connected after coming back');
+});
+
+test('the list layout honours "Show translation"', async () => {
+  const port = await freePort();
+  const viewer = await startViewer(port);
+  await publish(viewer.url, '列表里的译文');
+  const page = await openPage(`http://127.0.0.1:${port}`);
+  await until(page, shows('列表里的译文'), 'translation on the picture');
+
+  await page.eval(`document.getElementById('btnSettings').click()`); // opening the sheet fills it in
+  await page.eval(setForm('input[name="layout"][value="list"]', true));
+  await until(page, shows('列表里的译文', 'list'), 'translation in the list');
+  assert.equal(await page.eval(shows('First paragraph of the page.', 'list')), false); // original folded away
+  assert.equal(await page.eval(shows('这一段本来就是中文。', 'list')), false); // nothing to translate: left out
+
+  // translation off: the list reads the original text, as the picture does
+  await page.eval(setForm('#sShow', false));
+  await until(page, shows('First paragraph of the page.', 'list'), 'originals in the list');
+  assert.equal(await page.eval(shows('列表里的译文', 'list')), false);
+  assert.equal(await page.eval(shows('这一段本来就是中文。', 'list')), true);
+
+  // controls for the picture only are hidden in the list layout, and back for the picture
+  const hidden = (id: string) => `getComputedStyle(document.getElementById('${id}').closest('label')).display === 'none'`;
+  assert.equal(await page.eval(hidden('sOpacity')), true);
+  assert.equal(await page.eval(hidden('sFrame')), true);
+  assert.equal(await page.eval(hidden('sShow')), false);
+  await page.eval(setForm('input[name="layout"][value="picture"]', true));
+  assert.equal(await page.eval(hidden('sOpacity')), false);
 });

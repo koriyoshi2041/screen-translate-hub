@@ -14,13 +14,28 @@ let state: DisplayState = emptyState();
 let target = 'zh-Hans';
 let showTranslation = true;
 const renderer = new DomRenderer(root, settings);
+let imageSize = { w: 0, h: 0 };
+
+/** The screenshot keeps its aspect ratio: fitted into the stage and centred, the translations on top of it. */
+function fitBox(): { x: number; y: number; w: number; h: number } {
+  const sw = stage.clientWidth;
+  const sh = stage.clientHeight;
+  if (!imageSize.w || !imageSize.h) return { x: 0, y: 0, w: sw, h: sh };
+  const scale = Math.min(sw / imageSize.w, sh / imageSize.h);
+  const w = Math.round(imageSize.w * scale);
+  const h = Math.round(imageSize.h * scale);
+  return { x: Math.floor((sw - w) / 2), y: Math.floor((sh - h) / 2), w, h };
+}
 
 function draw(): void {
+  const box = fitBox();
+  for (const el of [canvas, root]) Object.assign(el.style, { left: `${box.x}px`, top: `${box.y}px`, width: `${box.w}px`, height: `${box.h}px` });
   root.style.display = showTranslation ? 'block' : 'none';
-  renderer.render(state, { width: stage.clientWidth, height: stage.clientHeight, targetLanguage: target });
+  renderer.render(state, { width: box.w, height: box.h, targetLanguage: target });
 }
 
 function paint(img: EncodedImage): void {
+  imageSize = { w: img.width, h: img.height };
   canvas.width = img.width;
   canvas.height = img.height;
   const ctx = canvas.getContext('2d')!;

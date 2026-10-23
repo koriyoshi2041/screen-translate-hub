@@ -7,7 +7,7 @@
 import type { ServiceManifest } from '@sth/model';
 import { RpcError } from '@sth/wire';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { aiManifest, type Emit, type TranslateEngine, type TranslateRequest } from './engine.ts';
@@ -41,8 +41,10 @@ export class ClaudeCliEngine implements TranslateEngine {
 
   constructor(cfg: ClaudeCliConfig = {}) {
     this.cfg = cfg;
-    // an empty working directory: no project instructions or settings get loaded
-    this.cwd = mkdtempSync(join(tmpdir(), 'sth-claude-'));
+    // an empty working directory: no project instructions or settings get loaded. One fixed
+    // directory shared by every instance, so nothing is left behind when the service is killed.
+    this.cwd = join(tmpdir(), 'sth-claude');
+    mkdirSync(this.cwd, { recursive: true });
     for (let i = 0; i < this.slots(); i++) this.pool.push(this.spawnWarm());
   }
 

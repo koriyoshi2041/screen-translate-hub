@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { RpcError } from '@sth/wire';
 import type { TranslateReply, TranslateRequest } from '../src/engine.ts';
+import { ClaudeCliEngine } from '../src/claude-cli.ts';
 import { MockEngine } from '../src/mock.ts';
 import { buildPrompt, extractItems, parseItems } from '../src/prompt.ts';
 import { ItemStreamer } from '../src/streaming.ts';
@@ -62,4 +64,15 @@ test('mock engine streams cumulative versions and marks completion', async () =>
   const texts = out.map((r) => ('update' in r ? r.update.text : undefined));
   assert.deepEqual(texts, ['a', 'a b', 'a b c', undefined]);
   assert.equal('update' in out[3] && out[3].update.final, true);
+});
+
+test('claude-cli reports itself unavailable at once when claude is missing', async () => {
+  const engine = new ClaudeCliEngine({ command: 'sth-no-such-claude', warm: 1 });
+  const started = Date.now();
+  await assert.rejects(
+    engine.translate(req, async () => {}, new AbortController().signal),
+    (e: unknown) => e instanceof RpcError && e.code === 'unavailable',
+  );
+  assert.ok(Date.now() - started < 2000);
+  await engine.close();
 });

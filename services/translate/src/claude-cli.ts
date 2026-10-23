@@ -81,11 +81,17 @@ export class ClaudeCliEngine implements TranslateEngine {
       proc,
       stdout: [],
       stderr: [],
-      exited: new Promise((r) => proc.once('exit', (code) => r(code))),
+      // a process that cannot start (claude not installed) emits only 'error', never 'exit'
+      exited: new Promise((r) => {
+        proc.once('exit', (code) => r(code));
+        proc.once('error', () => r(null));
+      }),
     };
     proc.stderr?.setEncoding('utf8');
     proc.stderr?.on('data', (d: string) => warm.stderr.push(d));
     proc.on('error', (e) => warm.stderr.push(String(e)));
+    // writing the prompt to a process that never started fails with EPIPE/EOF
+    proc.stdin?.on('error', () => {});
     return warm;
   }
 
@@ -143,6 +149,7 @@ export class ClaudeCliEngine implements TranslateEngine {
       const err = (w.stderr.join('') + (resultText ?? '')).slice(0, 300);
       if (/rate.?limit|429|overloaded/i.test(err)) throw new RpcError('rate_limited', err);
       if (/not logged in|login|auth/i.test(err)) throw new RpcError('permission_denied', err);
+      if (code === null && /ENOENT/.test(err)) throw new RpcError('unavailable', `claude not found (${this.cfg.command ?? 'claude'})`);
       throw new RpcError('unavailable', `claude exited ${code}: ${err}`);
     }
     await streamer.complete(resultText);

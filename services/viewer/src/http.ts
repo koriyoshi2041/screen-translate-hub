@@ -29,8 +29,13 @@ class Lockout {
   private readonly fails = new Map<string, { n: number; until: number }>();
 
   blocked(addr: string): boolean {
+    return this.remainingS(addr) > 0;
+  }
+
+  /** Seconds until the address may try again; 0 when it is not locked out. */
+  remainingS(addr: string): number {
     const f = this.fails.get(addr);
-    return !!f && f.until > Date.now();
+    return f ? Math.max(0, Math.ceil((f.until - Date.now()) / 1000)) : 0;
   }
 
   result(addr: string, ok: boolean): void {
@@ -89,6 +94,12 @@ export async function startHttp(o: HttpOptions): Promise<HttpServer> {
     }
     if (url.pathname === '/app.js') {
       res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }).end(o.web.js);
+      return;
+    }
+    if (url.pathname === '/lockout') {
+      // a browser cannot read why a WebSocket upgrade was refused; this tells the page about
+      // its own address only, so the page can say it is locked out instead of reconnecting
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify({ retry_after_s: lockout.remainingS(addr) }));
       return;
     }
     if (url.pathname === '/app.css') {

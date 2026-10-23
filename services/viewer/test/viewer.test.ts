@@ -141,3 +141,12 @@ test('publish, list, subscribe, frames, sharing off', async () => {
   await sources.return(undefined);
   local.conn.close();
 });
+
+test('ten wrong access codes lock the address out, and the page can ask why', async () => {
+  assert.deepEqual(await (await fetch(`${BASE}/lockout`)).json(), { retry_after_s: 0 });
+  for (let i = 0; i < 10; i++) assert.equal((await fetch(`${BASE}/frame/x?w=320`, { headers: { authorization: 'Bearer wrong' } })).status, 401);
+  assert.equal((await fetch(`${BASE}/frame/x?w=320`, { headers: { authorization: `Bearer ${ACCESS}` } })).status, 429);
+  await assert.rejects(browserConnect(BASE, ACCESS), /403/);
+  const { retry_after_s } = (await (await fetch(`${BASE}/lockout`)).json()) as { retry_after_s: number };
+  assert.ok(retry_after_s > 50 && retry_after_s <= 60);
+});

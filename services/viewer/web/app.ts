@@ -371,9 +371,24 @@ async function connectLoop(): Promise<void> {
         showLogin('That access code was not accepted.');
         return;
       }
+      const wait = await lockoutSeconds();
+      if (wait > 0) {
+        showLogin(`Too many wrong access codes from this device. Try again in ${wait} s.`);
+        return;
+      }
     }
     setStatus('bad', 'Disconnected');
     await sleep(Math.min(1000 * 2 ** attempt, 10_000));
+  }
+}
+
+/** Seconds this device is locked out for after too many wrong access codes; 0 if it is not. */
+async function lockoutSeconds(): Promise<number> {
+  try {
+    const res = await fetch('/lockout', { cache: 'no-store' });
+    return res.ok ? Number(((await res.json()) as { retry_after_s?: number }).retry_after_s) || 0 : 0;
+  } catch {
+    return 0;
   }
 }
 

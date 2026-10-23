@@ -48,7 +48,24 @@ export function usualGap(lines: Line[], p: NormalizeParams): number | undefined 
   return gaps[Math.floor((gaps.length - 1) / 4)];
 }
 
-export function shouldMerge(a: Line, b: Line, colWidth: number, p: NormalizeParams, baseGap?: number): boolean {
+/**
+ * Spacing between two horizontal lines, measured from their centres, in line heights. OCR
+ * boxes of one font differ by up to a fifth in height, so the line height is the smaller of
+ * the two lines' and the leaf's typical one.
+ */
+function looseGap(a: Line, b: Line, typicalGlyph = Infinity): number {
+  const h = Math.max(1e-6, Math.min(a.glyph, b.glyph, typicalGlyph));
+  const pitch = b.box.y + b.box.h / 2 - (a.box.y + a.box.h / 2);
+  return (pitch - h) / h;
+}
+
+/** The median glyph size of a leaf's horizontal lines. */
+export function typicalGlyph(lines: Line[]): number | undefined {
+  const sizes = lines.filter((l) => !isVertical(l.dir)).map((l) => l.glyph).sort((x, y) => x - y);
+  return sizes.length ? sizes[Math.floor(sizes.length / 2)] : undefined;
+}
+
+export function shouldMerge(a: Line, b: Line, colWidth: number, p: NormalizeParams, baseGap?: number, glyph?: number): boolean {
   const gap = lineGap(a, b, p);
   if (gap === null) return false; // 2 to 5
   const v = isVertical(a.dir);
@@ -56,8 +73,15 @@ export function shouldMerge(a: Line, b: Line, colWidth: number, p: NormalizePara
   // v1 addition: paragraphs set apart by extra spacing, even when it is under kg
   if (baseGap !== undefined && gap > baseGap + p.kp) return false;
   if (endsWithSentencePunct(a.text) && extent(a) < p.ks * colWidth) return false; // 6
-  if (v || endsWithContinuation(a.text)) return true;
   const startsUnit = /^[\p{Lu}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(b.text.trimStart());
+  // v1 addition: loose spacing after a sentence end, or before a heading, ends the paragraph.
+  // The lines of one paragraph sit closer than this; it holds when every paragraph is a single
+  // line, where the usual gap above has nothing smaller to compare with.
+  if (!v && looseGap(a, b, glyph) > p.ksg) {
+    if (endsWithSentencePunct(a.text)) return false;
+    if (startsUnit && extent(b) < p.shortLine * colWidth && b.glyph >= p.kHead * a.glyph) return false;
+  }
+  if (v || endsWithContinuation(a.text)) return true;
   // v1 addition: a line that stops well short of the column (a heading, or the last line of a
   // paragraph without final punctuation) ends its unit when the next line starts a new one.
   if (extent(a) < p.shortLine * colWidth && startsUnit) return false;
@@ -74,6 +98,7 @@ export function mergeParagraphs(leaf: OrderItem<Piece>[], p: NormalizeParams): P
   const lines = leaf.flatMap((it) => (it.ref.kind === 'line' ? [it.ref.line] : []));
   const colWidth = Math.max(1, ...lines.map(extent));
   const baseGap = usualGap(lines, p);
+  const glyph = typicalGlyph(lines);
   const out: Paragraph[] = [];
   let current: Line[] | null = null;
   for (const it of leaf) {
@@ -83,7 +108,7 @@ export function mergeParagraphs(leaf: OrderItem<Piece>[], p: NormalizeParams): P
       continue;
     }
     const line = it.ref.line;
-    if (current && shouldMerge(current[current.length - 1], line, colWidth, p, baseGap)) {
+    if (current && shouldMerge(current[current.length - 1], line, colWidth, p, baseGap, glyph)) {
       current.push(line);
     } else {
       current = [line];

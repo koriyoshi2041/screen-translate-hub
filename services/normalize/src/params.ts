@@ -22,6 +22,10 @@ export interface NormalizeParams {
   shortLine: number;
   /** v1 addition: a gap wider than the leaf's usual line gap by this many line heights is a paragraph break. */
   kp: number;
+  /** v1 addition: past this gap, in line heights, a sentence end or a heading ends the paragraph. */
+  ksg: number;
+  /** v1 addition: a short line at least this much taller than the line above is a heading. */
+  kHead: number;
 }
 
 export const DEFAULT_PARAMS: NormalizeParams = {
@@ -35,4 +39,6 @@ export const DEFAULT_PARAMS: NormalizeParams = {
   fragGap: 0.5,
   shortLine: 0.6,
   kp: 0.4,
+  ksg: 0.55,
+  kHead: 1.15,
 };

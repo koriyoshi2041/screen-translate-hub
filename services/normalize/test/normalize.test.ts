@@ -96,6 +96,22 @@ test('extra spacing between paragraphs splits them even under kg (v1 rule)', () 
   assert.deepEqual(units.map((u) => u.lines?.length), [1, 2, 2]);
 });
 
+test('single-line paragraphs with loose spacing stay apart, headings too (v1 rule)', () => {
+  // measured on the Tk test window at 1366 px wide: every paragraph fits on one line, so the
+  // usual gap is the paragraph gap itself (0.6 to 0.9 line heights)
+  const units = run([
+    blk('Before you begin, make sure that your computer meets the minimum requirements and that you have a stable network connection.', 21, 122, 909, 20),
+    blk('Installation', 20, 158, 106, 24),
+    blk('Download the installer from the releases page and run it. The installer asks where to put the program files and whether to create a desktop shortcut.', 21, 199, 1024, 20),
+    blk('When the installation finishes, start the program from the start menu. The first start takes a little longer because the program prepares its local cache.', 21, 234, 1031, 20),
+    blk('If the server uses a self-signed certificate, the program shows its fingerprint. Compare it with the one your administrator gave you before you accept it.', 21, 346 - 75, 1043, 20),
+    blk('Running a job', 20, 383 - 75, 136, 27),
+    blk('Select the files you want to process, pick a profile and press start. Progress is shown in the status bar at the bottom of the window.', 21, 423 - 75, 900, 20),
+    blk('You can pause a running job at any time. Paused jobs keep their place in the queue and continue where they stopped.', 22, 458 - 75, 812, 20),
+  ]);
+  assert.deepEqual(units.map((u) => u.lines?.length), [1, 1, 1, 1, 1, 1, 1, 1]);
+});
+
 test('a short line followed by a lowercase continuation still merges', () => {
   const units = run([
     blk('A long first line of a paragraph that spans the whole column', 100, 100, 900, 20),

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { EncodedImage } from '@sth/model';
+import { withTask } from '../src/brain-claude.ts';
 import { RuleGate } from '../src/gate.ts';
 import { tileChanges, type Heartbeat } from '../src/heartbeat.ts';
 import type { Platform } from '../src/platform.ts';
@@ -11,6 +12,7 @@ import type { Brain, BrainEvent, Gate, SessionServerMessage, WakeEvent } from '.
 class FakeBrain implements Brain {
   readonly name = 'fake';
   readonly wakes: WakeEvent[] = [];
+  readonly tasks: string[] = [];
   private release: Array<() => void> = [];
   opened = false;
   closed = false;
@@ -27,6 +29,10 @@ class FakeBrain implements Brain {
       signal.addEventListener('abort', () => r(), { once: true });
     });
     yield { type: 'turn_end', stop: signal.aborted ? 'cancelled' : 'done' };
+  }
+
+  setTask(task: string): void {
+    this.tasks.push(task);
   }
 
   finishTurn(): void {
@@ -98,6 +104,16 @@ test('pause cancels the turn and stops waking; a message resumes', async () => {
   await tick();
   assert.equal(s.state, 'thinking');
   assert.equal(brain.wakes.length, 2);
+  await s.stop();
+});
+
+test('a task set during the session reaches the brain, which tells the model once', async () => {
+  const { s, brain } = makeSession();
+  await s.start();
+  s.setTask('read the error dialog');
+  assert.deepEqual(brain.tasks, ['read the error dialog']);
+  assert.equal(withTask('hello', 'read the error dialog'), "[The user's task is now: read the error dialog]\nhello");
+  assert.equal(withTask('hello', null), 'hello');
   await s.stop();
 });
 

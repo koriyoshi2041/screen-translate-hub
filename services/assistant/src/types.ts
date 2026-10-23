@@ -72,6 +72,8 @@ export interface Brain {
   readonly name: string;
   open(task: string, tools: PlatformTool[]): Promise<void>;
   wake(ev: WakeEvent, signal: AbortSignal): AsyncIterable<BrainEvent>;
+  /** The user changed the task after open(); the brain tells the model on the next wake. */
+  setTask?(task: string): void;
   close(): Promise<void>;
 }
 

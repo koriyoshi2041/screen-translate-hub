@@ -45,6 +45,14 @@ export function wakeText(ev: WakeEvent): string {
   return `[Heartbeat: ${ev.decision?.reason ?? 'the screen changed'}.${where} Look at the screen if useful. If there is nothing worth saying, reply with a single "-".]`;
 }
 
+/**
+ * The system prompt is fixed when the model's conversation starts, so a task set later
+ * reaches it as a note in front of the next wake's text.
+ */
+export function withTask(text: string, task: string | null): string {
+  return task === null ? text : `[The user's task is now: ${task || '(none)'}]\n${text}`;
+}
+
 /** Async queue bridging the process's stdout to the wake iterator. */
 class Lines {
   private items: Array<Record<string, unknown>> = [];
@@ -77,6 +85,8 @@ export class ClaudeCodeBrain implements Brain {
   private lines = new Lines();
   private dir = '';
   private task = '';
+  /** A task set since the process started, not yet told to the model. */
+  private taskNote: string | null = null;
   private stderr = '';
 
   constructor(cfg: ClaudeBrainConfig) {
@@ -89,7 +99,14 @@ export class ClaudeCodeBrain implements Brain {
     this.start();
   }
 
+  setTask(task: string): void {
+    this.task = task;
+    this.taskNote = task;
+  }
+
   private start(): void {
+    // a new process gets the current task in its system prompt
+    this.taskNote = null;
     const mcpScript = join(dirname(fileURLToPath(import.meta.url)), 'mcp.ts');
     const mcpConfig = join(this.dir, 'mcp.json');
     // the session token goes into a file in a private temp directory rather than onto a command line
@@ -160,7 +177,9 @@ export class ClaudeCodeBrain implements Brain {
       }, 3000).unref();
     };
     signal.addEventListener('abort', onAbort, { once: true });
-    proc.stdin!.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content: wakeText(ev) } })}\n`);
+    const text = withTask(wakeText(ev), this.taskNote);
+    this.taskNote = null;
+    proc.stdin!.write(`${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`);
     yield { type: 'status', text: 'thinking' };
     const toolNames = new Map<string, string>();
     try {

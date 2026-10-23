@@ -3,7 +3,7 @@
 // load); the conversation lives in memory for the length of the assistant session.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { wakeText } from './brain-claude.ts';
+import { wakeText, withTask } from './brain-claude.ts';
 import { systemPrompt } from './tools.ts';
 import type { Brain, BrainEvent, PlatformTool, WakeEvent } from './types.ts';
 
@@ -59,6 +59,8 @@ export class PiBrain implements Brain {
   readonly name = 'pi';
   private readonly cfg: PiBrainConfig;
   private session: PiSession | null = null;
+  /** A task set after open(), not yet told to the model. */
+  private taskNote: string | null = null;
 
   constructor(cfg: PiBrainConfig) {
     this.cfg = cfg;
@@ -125,6 +127,10 @@ export class PiBrain implements Brain {
     this.session = session as unknown as PiSession;
   }
 
+  setTask(task: string): void {
+    this.taskNote = task;
+  }
+
   async *wake(ev: WakeEvent, signal: AbortSignal): AsyncIterable<BrainEvent> {
     const session = this.session;
     if (!session) {
@@ -140,7 +146,9 @@ export class PiBrain implements Brain {
     const onAbort = () => void session.abort();
     signal.addEventListener('abort', onAbort, { once: true });
     q.push({ type: 'status', text: 'thinking' });
-    session.prompt(wakeText(ev)).then(
+    const text = withTask(wakeText(ev), this.taskNote);
+    this.taskNote = null;
+    session.prompt(text).then(
       () => {
         const last = session.messages.at(-1);
         if (signal.aborted) q.close({ type: 'turn_end', stop: 'cancelled' });

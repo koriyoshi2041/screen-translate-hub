@@ -163,6 +163,7 @@ export class AssistantSession {
 
   setTask(task: string): void {
     this.task = task;
+    this.d.brain.setTask?.(task);
   }
 
   async stop(): Promise<void> {

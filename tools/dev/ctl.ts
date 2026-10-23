@@ -6,6 +6,8 @@
 //   node tools/dev/ctl.ts sharing on|off | interactive | overlay-toggle
 //   node tools/dev/ctl.ts assistant [message]    (opens the AI card; with a message, sends it)
 //   node tools/dev/ctl.ts assistant-card          (the card's state, status line and log)
+//   node tools/dev/ctl.ts assistant-pause | assistant-resume | assistant-clear
+//   node tools/dev/ctl.ts cards | cards-close      (floating screenshot cards)
 //   node tools/dev/ctl.ts settings '{"display":{"mode":"dim"}}'   (or @patch.json from PowerShell)
 //   node tools/dev/ctl.ts overlay-eval "document.body.innerHTML.length" [host index]
 import { readFileSync } from 'node:fs';

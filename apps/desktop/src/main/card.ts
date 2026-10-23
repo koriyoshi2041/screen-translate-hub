@@ -23,6 +23,7 @@ export class CardService {
   private readonly env: WindowEnv;
   private readonly placement: () => ScreenshotPlacement;
   private inplace: OverlayHost[] = [];
+  private readonly floating = new Set<BrowserWindow>();
   private seq = 0;
 
   constructor(env: WindowEnv, placement: () => ScreenshotPlacement) {
@@ -94,6 +95,8 @@ export class CardService {
     });
     if (!this.env.debugCapturable) win.setContentProtection(true);
     win32.makeToolWindow(win32.hwndOf(win.getNativeWindowHandle()));
+    this.floating.add(win);
+    win.on('closed', () => this.floating.delete(win));
     void win.loadFile(join(this.env.rendererDir, 'card.html'));
     const ready = new Promise<void>((r) => win.webContents.once('did-finish-load', () => r()));
     void ready.then(() => win.showInactive());
@@ -149,6 +152,11 @@ export class CardService {
     for (const h of [...this.inplace]) h.close();
     this.inplace = [];
     this.updateWatch();
+  }
+
+  /** The floating cards on screen (dev control). */
+  cardWindows(): BrowserWindow[] {
+    return [...this.floating].filter((w) => !w.isDestroyed());
   }
 
   hosts(): OverlayHost[] {

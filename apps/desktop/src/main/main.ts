@@ -356,6 +356,14 @@ function startDevControl(): void {
           out = { visible: overlay.toggleVisible() };
         } else if (a.action === 'assistant-stop') {
           assistant.close();
+        } else if (a.action === 'assistant-pause' || a.action === 'assistant-resume' || a.action === 'assistant-clear') {
+          await assistant.press(a.action);
+        } else if (a.action === 'cards') {
+          // floating screenshot cards: window bounds and where the picture sits inside
+          const js = `(() => { const c = document.getElementById('img'); return { left: c.style.left, top: c.style.top, width: c.style.width, height: c.style.height, bitmap: [c.width, c.height] }; })()`;
+          out = await Promise.all(cards.cardWindows().map(async (w) => ({ bounds: w.getBounds(), picture: await w.webContents.executeJavaScript(js) })));
+        } else if (a.action === 'cards-close') {
+          for (const w of cards.cardWindows()) w.close();
         } else if (a.action === 'assistant-card') {
           const w = assistant.window();
           out = w ? await w.webContents.executeJavaScript(`({ state: document.getElementById('state').textContent, status: document.getElementById('status').textContent, log: document.getElementById('log').innerText })`) : null;

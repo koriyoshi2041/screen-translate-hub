@@ -130,6 +130,11 @@ export class AssistantCard {
     if (this.previous) win32.setForeground(this.previous);
   }
 
+  /** A button of the card, pressed through the dev control (pause, resume, clear, stop). */
+  press(kind: 'assistant-pause' | 'assistant-resume' | 'assistant-clear' | 'assistant-stop'): Promise<void> {
+    return this.onCard({ kind });
+  }
+
   private async onCard(msg: CardMessage): Promise<void> {
     const s = this.stream;
     switch (msg.kind) {

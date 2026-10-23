@@ -260,21 +260,26 @@ function openSettings(): void {
   void settingsWin.loadFile(join(env.rendererDir, 'settings.html'));
 }
 
+/** Saves a settings change and applies it, from the settings page or the dev control. */
+function applySettings(patch: Patch<Settings>): void {
+  const services = () => JSON.stringify([store.value.translators, store.value.viewer, store.value.assistant, store.value.target_language]);
+  const before = services();
+  store.update(patch);
+  overlay.applySettings(store.value.display);
+  registerHotkeys();
+  refreshTray();
+  if (services() !== before) {
+    // translators, viewer or assistant changed: redefine and restart the services
+    agent.supervisor.stopAll();
+    defineServices(store.value);
+    prewarm();
+  }
+}
+
 ipcMain.handle('sth', async (_e, msg: { kind: string; patch?: Patch<Settings> }) => {
   if (msg.kind === 'get-settings') return store.value;
   if (msg.kind === 'save-settings' && msg.patch) {
-    const services = () => JSON.stringify([store.value.translators, store.value.viewer, store.value.assistant, store.value.target_language]);
-    const before = services();
-    store.update(msg.patch);
-    overlay.applySettings(store.value.display);
-    registerHotkeys();
-    refreshTray();
-    if (services() !== before) {
-      // translators, viewer or assistant changed: redefine and restart the services
-      agent.supervisor.stopAll();
-      defineServices(store.value);
-      prewarm();
-    }
+    applySettings(msg.patch);
     return store.value;
   }
   return null;
@@ -303,10 +308,8 @@ function startDevControl(): void {
         else if (a.action === 'continuous-stop') await stopContinuous();
         else if (a.action === 'continuous-toggle') await toggleContinuous();
         else if (a.action === 'state') out = { continuous: continuous?.status ?? null, services: agent.list().map((r) => r.manifest.name), settings: store.value };
-        else if (a.action === 'settings') {
-          store.update(a.patch as Patch<Settings>);
-          overlay.applySettings(store.value.display);
-        } else if (a.action === 'details') {
+        else if (a.action === 'settings') applySettings(a.patch as Patch<Settings>);
+        else if (a.action === 'details') {
           const id = (a.run_id as string | undefined) ?? continuous?.id;
           out = id ? await launcher.details(id) : null;
         }

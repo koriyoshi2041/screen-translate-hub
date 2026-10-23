@@ -33,9 +33,19 @@ function pointer(inside: boolean, x: number, y: number): void {
     return;
   }
   tip.textContent = `${hit.source}\n\n${hit.translation}`;
+  // the overlay is only as large as the target window: keep the tip inside it, to the left
+  // of or above the pointer when it does not fit to the right or below
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  tip.style.maxWidth = `${Math.min(480, W - 8)}px`;
+  tip.style.maxHeight = `${H - 8}px`;
   tip.style.display = 'block';
-  tip.style.left = `${Math.max(0, Math.min(x + 12, window.innerWidth - 500))}px`;
-  tip.style.top = `${Math.max(0, Math.min(y + 12, window.innerHeight - 120))}px`;
+  const w = tip.offsetWidth;
+  const h = tip.offsetHeight;
+  const left = x + 12 + w <= W ? x + 12 : x - 12 - w;
+  const top = y + 12 + h <= H ? y + 12 : y - 12 - h;
+  tip.style.left = `${Math.max(0, Math.min(left, W - w))}px`;
+  tip.style.top = `${Math.max(0, Math.min(top, H - h))}px`;
 }
 
 sth.on((msg) => {

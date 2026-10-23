@@ -51,6 +51,16 @@ class OcrTest(unittest.IsolatedAsyncioTestCase):
             await self.peer.unary("ocr", "Recognize", {"languages": ["ar"], "regions": []})
         self.assertEqual(cm.exception.code, "invalid_argument")
 
+    async def test_image_size_mismatch(self):
+        from sth_wire import RpcError
+
+        bad = {"run_id": "r", "batch_seq": 1, "languages": ["auto"],
+               "regions": [{"image": {"format": "raw_bgra8", "width": 100, "height": 100, "data": bytes(4)},
+                            "rect": {"x": 0, "y": 0, "w": 100, "h": 100}, "scale": 1.0}]}
+        with self.assertRaises(RpcError) as cm:
+            await self.peer.unary("ocr", "Recognize", bad, deadline_ms=30000)
+        self.assertEqual(cm.exception.code, "invalid_argument")
+
     def test_order_quad(self):
         q = order_quad([(10, 20), (0, 20), (10, 0), (0, 0)])
         self.assertEqual([(p["x"], p["y"]) for p in q], [(0, 0), (10, 0), (10, 20), (0, 20)])

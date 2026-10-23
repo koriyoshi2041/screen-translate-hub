@@ -34,7 +34,10 @@ def decode_image(img: dict) -> np.ndarray:
     fmt = img.get("format", "raw_bgra8")
     data = img["data"]
     if fmt == "raw_bgra8":
-        return np.frombuffer(data, dtype=np.uint8).reshape(int(img["height"]), int(img["width"]), 4)
+        width, height = int(img["width"]), int(img["height"])
+        if width <= 0 or height <= 0 or len(data) != width * height * 4:
+            raise RpcError("invalid_argument", f"raw_bgra8 image of {width}x{height} needs {width * height * 4} bytes, got {len(data)}")
+        return np.frombuffer(data, dtype=np.uint8).reshape(height, width, 4)
     arr = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
     if arr is None:
         raise RpcError("invalid_argument", f"cannot decode {fmt}")

@@ -4,7 +4,7 @@
 import type { CaptureGeometry, DisplayEvent, DisplaySnapshot, Image } from '@sth/model';
 import type { ScreenshotPlacement } from '@sth/render';
 import type { Stream } from '@sth/wire';
-import { BrowserWindow, globalShortcut, screen } from 'electron';
+import { BrowserWindow, screen } from 'electron';
 import { join } from 'node:path';
 import { OverlayHost, type WindowEnv } from './host.ts';
 import * as win32 from './win32.ts';
@@ -23,7 +23,6 @@ export class CardService {
   private readonly env: WindowEnv;
   private readonly placement: () => ScreenshotPlacement;
   private inplace: OverlayHost[] = [];
-  private escRegistered = false;
   private seq = 0;
 
   constructor(env: WindowEnv, placement: () => ScreenshotPlacement) {
@@ -58,10 +57,10 @@ export class CardService {
     const closers: Array<() => void> = [];
     host.onClosed = () => {
       this.inplace = this.inplace.filter((x) => x !== host);
-      this.updateEsc();
+      this.updateWatch();
       for (const c of closers) c();
     };
-    this.updateEsc();
+    this.updateWatch();
     return { send: (m) => host.send(m), onClosed: (cb) => closers.push(cb) };
   }
 
@@ -106,27 +105,34 @@ export class CardService {
 
   /**
    * While in-place results are on screen, Esc or a click outside them dismisses them
-   * (requirement 09 section 3.1). The results let clicks through, so a click is seen by
-   * polling the button; a click inside a result stays with the window under it.
+   * (requirement 09 section 3.1). Both are seen by polling: the results let clicks through,
+   * so a click inside a result stays with the window under it, and a global Esc hotkey would
+   * take the key away from every other program while results are shown.
    */
-  private updateEsc(): void {
+  private updateWatch(): void {
     const want = this.inplace.length > 0;
-    if (want && !this.escRegistered) {
-      this.escRegistered = globalShortcut.register('Escape', () => this.dismissInPlace());
+    if (want && !this.watchTimer) {
       this.wasDown = win32.leftButtonDown();
-      this.clickTimer = setInterval(() => this.watchClick(), 50);
-    } else if (!want && this.escRegistered) {
-      globalShortcut.unregister('Escape');
-      this.escRegistered = false;
-      if (this.clickTimer) clearInterval(this.clickTimer);
-      this.clickTimer = undefined;
+      this.escWasDown = win32.keyDown(win32.VK_ESCAPE);
+      this.watchTimer = setInterval(() => this.watchInput(), 50);
+    } else if (!want && this.watchTimer) {
+      clearInterval(this.watchTimer);
+      this.watchTimer = undefined;
     }
   }
 
   private wasDown = false;
-  private clickTimer?: ReturnType<typeof setInterval>;
+  private escWasDown = false;
+  private watchTimer?: ReturnType<typeof setInterval>;
 
-  private watchClick(): void {
+  private watchInput(): void {
+    const esc = win32.keyDown(win32.VK_ESCAPE);
+    const escPressed = esc && !this.escWasDown;
+    this.escWasDown = esc;
+    if (escPressed) {
+      this.dismissInPlace();
+      return;
+    }
     const down = win32.leftButtonDown();
     if (down && !this.wasDown) {
       const c = win32.cursorPos();
@@ -142,7 +148,7 @@ export class CardService {
   dismissInPlace(): void {
     for (const h of [...this.inplace]) h.close();
     this.inplace = [];
-    this.updateEsc();
+    this.updateWatch();
   }
 
   hosts(): OverlayHost[] {

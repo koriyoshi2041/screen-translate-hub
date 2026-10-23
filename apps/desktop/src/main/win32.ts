@@ -58,10 +58,17 @@ export function setForeground(hwnd: number): boolean {
   return !!hwnd && isWindow(hwnd) && SetForegroundWindow(hwnd);
 }
 
+/** Whether a key or mouse button (virtual-key code) is down right now. */
+export function keyDown(vk: number): boolean {
+  return (GetAsyncKeyState(vk) & 0x8000) !== 0;
+}
+
 /** Whether the left mouse button is down right now. */
 export function leftButtonDown(): boolean {
-  return (GetAsyncKeyState(0x01) & 0x8000) !== 0;
+  return keyDown(0x01);
 }
+
+export const VK_ESCAPE = 0x1b;
 
 const GW_HWNDPREV = 3;
 const GA_ROOT = 2;

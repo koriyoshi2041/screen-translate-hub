@@ -1,7 +1,8 @@
 // Bergamot: Firefox's offline translation engine as WebAssembly, with Firefox's own
-// models (requirement 09 section 3.3). Models download on first use; until a pair is
-// on disk the source answers `unavailable` with a retry hint, so the run coordinator
-// uses the other sources meanwhile (spec 04 section 6.3).
+// models (requirement 09 section 3.3). Models download on first use. A request waits a
+// few seconds for the download (other sources race meanwhile anyway); if the model is
+// still not there, the source answers `unavailable` with a retry hint (spec 04 section 6.3)
+// and the download carries on.
 import type { ServiceManifest } from '@sth/model';
 import { sameLanguage } from '@sth/model';
 import { RpcError } from '@sth/wire';
@@ -25,6 +26,8 @@ export interface BergamotConfig {
 const here = dirname(fileURLToPath(import.meta.url));
 const GLUE = join(here, '..', 'vendor', 'bergamot', 'bergamot-translator.js');
 const RETRY_WHILE_DOWNLOADING_MS = 30_000;
+/** How long one request waits for a first-use download before answering unavailable. */
+const DOWNLOAD_WAIT_MS = 10_000;
 
 /** Firefox names Chinese by script; plain "zh" means Simplified. */
 function firefoxTag(tag: string): string {
@@ -198,9 +201,23 @@ export class BergamotEngine implements TranslateEngine {
         continue;
       }
       if (!route.every(([a, b]) => this.isLocal(a, b))) {
-        // first use: fetch in the background and let the other sources answer meanwhile
-        for (const [a, b] of route) void this.prepare(a, b).catch(() => undefined);
-        throw new RpcError('unavailable', `downloading the ${from} to ${to} model`, RETRY_WHILE_DOWNLOADING_MS);
+        // first use: the download (about 50 MB) usually takes a few seconds; wait that long
+        const ready = Promise.all(route.map(([a, b]) => this.prepare(a, b)));
+        ready.catch(() => undefined);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const waited = await Promise.race([
+          ready.then(
+            () => 'ready' as const,
+            (err: Error) => {
+              throw new RpcError('unavailable', `could not get the ${from} to ${to} model: ${err.message}`, RETRY_WHILE_DOWNLOADING_MS);
+            },
+          ),
+          new Promise<'late'>((r) => (timer = setTimeout(() => r('late'), DOWNLOAD_WAIT_MS))),
+          new Promise<'aborted'>((r) => signal.addEventListener('abort', () => r('aborted'), { once: true })),
+        ]);
+        clearTimeout(timer);
+        if (waited === 'aborted') return;
+        if (waited === 'late') throw new RpcError('unavailable', `downloading the ${from} to ${to} model`, RETRY_WHILE_DOWNLOADING_MS);
       }
       for (const [a, b] of route) await this.prepare(a, b);
       if (signal.aborted) return;

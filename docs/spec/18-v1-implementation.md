@@ -181,7 +181,7 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 | `direction.ts` | `inferDirection(block): Direction` | 06 第 3 节 |
 | `lines.ts` | `mergeFragments(blocks): Line[]` | 06 第 4 节 |
 | `order.ts` | `readingOrder(items, gMin): Item[]`；`leafOrder(items, dir)` | 06 第 5 节的递归切分 |
-| `paragraphs.ts` | `mergeParagraphs(items, params): Paragraph[]` | 06 第 6 节 |
+| `paragraphs.ts` | `mergeParagraphs(items, params): Paragraph[]`；`shouldMerge(a, b, colWidth, params, usualGap, typicalGlyph)` | 06 第 6 节、第 6.1 节 |
 | `join.ts` | `joinLines(a, b): string` | 06 第 7 节 |
 
 ## 10 services/translate
@@ -232,7 +232,7 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 | `main.ts` | 服务入口 | 本机端点提供 `viewer.Publish`、`viewer.SetSharing`、`viewer.SetAccessToken`；浏览器连接提供 `viewer.ListSources`、`viewer.Subscribe`；跟随 `agent.WatchSharing` |
 | `sources.ts` | `class SourceRegistry`：`add(start)`、`remove(src)`、`clear()`、`list()`、`watch(cb)`、`frame(id)`；`class Source`：`putFrame`、`setSnapshot`、`event`、`subscribe`、`close` | [后台平台服务](10-backend.md) 5.1 至 5.3 的来源与快照；每路来源保留最近 3 张批次画面 |
 | `frames.ts` | `class FrameStore`：`get(id, width, dataSaver, format)`、`drop(ids)` | 按观看端宽度缩放（按 64 像素取整，只缩小不放大）并编码，同一画面、宽度、质量只编码一次 |
-| `http.ts` | `startHttp(opts)` | 观看页、`GET /frame/{image_id}`、`/ws` 上的浏览器 WebSocket |
+| `http.ts` | `startHttp(opts)` | 观看页、`GET /frame/{image_id}`、`/ws` 上的浏览器 WebSocket；`GET /lockout` 只告诉请求方自己还要等几秒（锁定时 WebSocket 被拒，浏览器读不到原因） |
 | `web.ts` | `buildWeb()` | 服务启动时用 esbuild 在内存中打包观看页，发行版可以预先打包到 `web/dist` |
 | `web/` | 观看页 | 来源列表、画面与译文、段落面板、显示设置、列表布局；用 `@sth/render` 绘制 |
 
@@ -257,7 +257,7 @@ Python 的 `services/py/sth_wire` 提供同名的 `Connection`、`Stream`、`Ser
 | `platform.ts` | `class Platform`：`grab(region?)`、`read(img)`、`translations()`、`annotate(items)`、`clearAnnotations(ids?)`、`close()` | 经主程序取得采集、OCR、归一化、协调器和覆盖层 |
 | `tools.ts` | `platformTools(ctx): PlatformTool[]`；`systemPrompt(task)` | 17 第 6 节，TypeBox 定义一份，供 pi 和 MCP 共用 |
 | `brain-pi.ts` | `class PiBrain` | 17 第 5.2 节、第 10.3 节 |
-| `brain-claude.ts` | `class ClaudeCodeBrain`；`wakeText(ev)` | 17 第 5.2 节、第 10.3 节 |
+| `brain-claude.ts` | `class ClaudeCodeBrain`；`wakeText(ev)`；`withTask(text, task)`：会话中途设定的任务放在下一次叫醒的消息前；`removeStaleDirs()` | 17 第 5.2 节、第 10.3 节 |
 | `mcp.ts` | 独立进程 | Claude Code 启动的 MCP stdio 代理 |
 
 桌面端的 AI 卡片在 `apps/desktop/src/main/assistant-card.ts`（`class AssistantCard`：`summon()`、`ask(text)`、`close()`）和 `renderer/assistant.*`。
@@ -286,7 +286,7 @@ Electron 部分在 `apps/desktop/src`：
 | `main/host.ts` | `class OverlayHost`：`send(msg)`、`setBounds(b)`、`show()`、`hide()`、`eval(js)`、`frame()`、`close()` | 离屏渲染的页面加一个分层窗口；覆盖层、原位截图结果、AI 标注共用 |
 | `main/overlay.ts` | `class OverlayManager`：`overlay.Attach`、`overlay.Annotate`、`toggleVisible()`、`toggleInteractive()`、`applySettings(s)` | 覆盖层：每 60 ms 跟随采集范围或被采集的窗口，窗口最小化时隐藏；交互模式下轮询指针，悬停显示原文，单击复制 |
 | `main/select.ts` | `selectRegion(env, grab): Promise<Selection \| null>`；`cropImage(img, rect)` | 框选：先截整屏，在不透明全屏窗口中显示冻结的画面，结果从这张截图裁出 |
-| `main/card.ts` | `class CardService`：`card.Open`、`dismissInPlace()` | 截图结果：画在原位（Esc 关闭）或截图浮卡 |
+| `main/card.ts` | `class CardService`：`card.Open`、`dismissInPlace()` | 截图结果：画在原位（Esc 或在结果之外点击关闭，两者都轮询按键状态，不注册全局热键）或截图浮卡（截图保持宽高比） |
 | `main/win32.ts` | `windowFrame(hwnd)`、`isWindow`、`isMinimized`、`foregroundWindow()`、`topWindowAt(x, y)`、`placeAbove(hwnd, target)`、`cursorPos()`、`leftButtonDown()`、`windowInfo(hwnd)` | koffi 调用 user32、dwmapi |
 | `renderer/*` | 各窗口的页面 | 覆盖层、原位结果、浮卡、AI 标注、框选、设置 |
 
@@ -303,7 +303,7 @@ Chromium 的透明窗口依赖 GPU 合成。远程桌面、虚拟显示器和部
 
 ### 15.2 历史记录、工作流文件和代理
 
-- **历史记录**（需求 09 第 2 节"部分"）：`packages/agent-core/src/history.ts` 的 `HistoryStore` 在 `%APPDATA%\screen-translate-hub\history\YYYY-MM-DD\` 下每条记录写一个 JSON 文件；截图翻译另存一张 JPEG（由主程序用 `nativeImage` 编码，`agent-core` 不依赖 Electron）。截图翻译完成时运行协调器经 `agent.SaveHistory` 发送原文、译文、失败原因和相对位置；AI 助手会话结束时发送任务和对话。不做容量管理和同步，托盘菜单可以打开这个目录；
+- **历史记录**（需求 09 第 2 节"部分"）：`packages/agent-core/src/history.ts` 的 `HistoryStore` 在 `%APPDATA%\screen-translate-hub\history\YYYY-MM-DD\` 下每条记录写一个 JSON 文件（目录和文件名用本地时间，记录内的时间是 UTC）；截图翻译另存一张 JPEG（由主程序用 `nativeImage` 编码，`agent-core` 不依赖 Electron）。截图翻译完成时运行协调器经 `agent.SaveHistory` 发送原文、译文、失败原因和相对位置；AI 助手会话结束时发送任务和对话。不做容量管理和同步，托盘菜单可以打开这个目录；
 - **原位截图结果的关闭**：Esc，或者在结果范围之外按下鼠标左键。结果窗口让点击穿透，所以按键是轮询得到的（每 50 毫秒），在结果范围之内的点击照常交给下面的窗口；
 - **工作流文件**：节点编辑器之前，数据目录下的 `workflows/screenshot.json`、`workflows/continuous.json` 存在时代替从设置生成的默认工作流。文件先经 `@sth/workflow` 的静态校验，`entry` 也必须对应；有问题时弹出通知并沿用默认工作流；
 - **外部服务的代理**：翻译源和 AI 助手的设置可以带 `proxy`（如 `http://127.0.0.1:7890`）。服务进程启动时带上 `NODE_USE_ENV_PROXY=1`、`HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY=127.0.0.1,localhost`，Node 24 的 `fetch` 据此经代理连接外部服务，本机服务之间的连接不受影响。Claude Code 子进程继承同样的变量。

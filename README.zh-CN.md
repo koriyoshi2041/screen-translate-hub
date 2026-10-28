@@ -33,7 +33,7 @@ PowerShell 中使用 `npm.cmd`，可直接运行 npm 的 Windows 启动器。
 
 默认翻译源是本机已登录的 Claude Code（`claude` 在 PATH 上）加 Bergamot；Bergamot 第一次使用时下载约 50 MB 的模型。快捷键：Alt+Shift+S 截图翻译，Alt+Shift+C 开始或暂停持续翻译，Alt+Shift+H 显示或隐藏覆盖层，Alt+Shift+I 交互模式，Alt+Shift+A AI 助手。手机观看：在设置中关闭 "Only this computer"，通过托盘菜单 "Copy viewer link" 复制观看链接，并在同一网络的手机上打开。首次运行时按 Windows 防火墙提示允许 Node.js 接受连接；也可以在管理员 PowerShell 中运行 `tools/win/allow-viewer.ps1`，只放行观看端口、只在专用网络上放行。访问码会随链接传递，请只分享给需要观看的人。
 
-测试：`npm.cmd test`（TypeScript 各包及观看页回归）、`npm.cmd run test:py`（Python 服务）、`npm.cmd run typecheck`、`npm.cmd run test:desktop`（构建、原生覆盖层 DPI 和助手焦点回归）。隔离的端到端测试使用合成画面：`node tools/dev/e2e.ts both mock`；接入本机 Claude Code 验证真实翻译：`node tools/dev/e2e.ts screenshot claude`。经 SSH 在远程电脑上开发时的工具见 [第一版实现](docs/spec/18-v1-implementation.md) 第 16 节。
+测试：`npm.cmd test`（TypeScript 各包及观看页回归）、`npm.cmd run test:py`（Python 服务）、`npm.cmd run typecheck`、`npm.cmd run test:desktop`（构建、DPI、中文输入、截图浮卡与助手生命周期回归）。隔离的端到端测试使用合成画面：`node tools/dev/e2e.ts both mock`；接入本机 Claude Code 验证真实翻译：`node tools/dev/e2e.ts screenshot claude`。经 SSH 在远程电脑上开发时的工具见 [第一版实现](docs/spec/18-v1-implementation.md) 第 16 节。
 
 GitHub Actions 会在 PR 和 `main` 上运行 Windows 检查：安装依赖、类型检查、自动测试、桌面构建和合成画面的完整流程。真实 Claude 翻译使用本机已登录的安装进行检查。
 

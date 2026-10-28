@@ -56,7 +56,7 @@ function notify(title: string, body: string): void {
   if (Notification.isSupported()) new Notification({ title, body, silent: true }).show();
 }
 
-function defineServices(s: Settings): void {
+async function defineServices(s: Settings, replace = false): Promise<void> {
   const local = s.translators[s.translators.length - 1]?.name ?? 'translate.claude-cli';
   agent.setAlias('bundled.ocr', 'ocr.rapidocr');
   agent.setAlias('bundled.translate', local);
@@ -69,7 +69,8 @@ function defineServices(s: Settings): void {
     viewer: s.viewer.enabled ? { port: s.viewer.port, host: s.viewer.host, access_token: s.viewer.access_token } : undefined,
     assistant: { ...s.assistant, own_pids: [process.pid], data_dir: store.dir },
   });
-  for (const spec of specs) agent.define(spec);
+  if (replace) await agent.replaceServices(specs);
+  else for (const spec of specs) agent.define(spec);
 }
 
 /** Start the services a first screenshot needs, so it does not wait for model loading. */
@@ -113,7 +114,7 @@ async function screenshotRegion(rect: PhysicalRect): Promise<RunHandle> {
 
 async function startScreenshot(): Promise<void> {
   cards.dismissInPlace();
-  const sel = await selectRegion(env, () => grab({}));
+  const sel = await selectRegion(env, (region) => grab({ region }));
   if (!sel) return;
   const { rect, image } = sel;
   const run = await launcher.start(currentWorkflows().screenshot, { image, anchor: { x: rect.x, y: rect.y + rect.h + 8 } });
@@ -174,20 +175,7 @@ function viewerLink(): string {
 }
 
 async function newViewerCode(): Promise<void> {
-  const code = newAccessCode();
-  store.update({ viewer: { access_token: code } });
-  try {
-    const reg = await agent.waitFor('viewer');
-    const conn = await connect(reg.endpoint, { token: agent.token, peer: 'agent' });
-    try {
-      await new Peer(conn, reg.manifest.name).unary('viewer', 'SetAccessToken', { access_token: code }, { deadlineMs: 5_000 });
-    } finally {
-      conn.close();
-    }
-  } catch (e) {
-    console.error('viewer access code not applied:', (e as Error).message);
-  }
-  refreshTray();
+  await applySettings({ viewer: { access_token: newAccessCode() } });
 }
 
 function refreshTray(): void {
@@ -261,17 +249,25 @@ function openSettings(): void {
 }
 
 /** Saves a settings change and applies it, from the settings page or the dev control. */
-function applySettings(patch: Patch<Settings>): void {
+let settingsChange = Promise.resolve();
+function applySettings(patch: Patch<Settings>): Promise<void> {
+  const change = settingsChange.then(() => updateSettings(patch));
+  settingsChange = change.catch(() => undefined);
+  return change;
+}
+
+async function updateSettings(patch: Patch<Settings>): Promise<void> {
   const services = () => JSON.stringify([store.value.translators, store.value.viewer, store.value.assistant, store.value.target_language]);
   const before = services();
   store.update(patch);
+  agent.setSharing(store.value.sharing);
   overlay.applySettings(store.value.display);
+  cards.applySettings(store.value.display);
   registerHotkeys();
   refreshTray();
   if (services() !== before) {
     // translators, viewer or assistant changed: redefine and restart the services
-    agent.supervisor.stopAll();
-    defineServices(store.value);
+    await defineServices(store.value, true);
     prewarm();
   }
 }
@@ -279,7 +275,7 @@ function applySettings(patch: Patch<Settings>): void {
 ipcMain.handle('sth', async (_e, msg: { kind: string; patch?: Patch<Settings> }) => {
   if (msg.kind === 'get-settings') return store.value;
   if (msg.kind === 'save-settings' && msg.patch) {
-    applySettings(msg.patch);
+    await applySettings(msg.patch);
     return store.value;
   }
   return null;
@@ -307,8 +303,8 @@ function startDevControl(): void {
         } else if (a.action === 'continuous-start') await startContinuous((a.mode as Settings['continuous']['range']) ?? 'display');
         else if (a.action === 'continuous-stop') await stopContinuous();
         else if (a.action === 'continuous-toggle') await toggleContinuous();
-        else if (a.action === 'state') out = { continuous: continuous?.status ?? null, services: agent.list().map((r) => r.manifest.name), settings: store.value };
-        else if (a.action === 'settings') applySettings(a.patch as Patch<Settings>);
+        else if (a.action === 'state') out = { sharing: agent.sharingEnabled, continuous: continuous?.status ?? null, services: agent.list().map((r) => r.manifest.name), settings: store.value };
+        else if (a.action === 'settings') await applySettings(a.patch as Patch<Settings>);
         else if (a.action === 'details') {
           const id = (a.run_id as string | undefined) ?? continuous?.id;
           out = id ? await launcher.details(id) : null;
@@ -429,7 +425,7 @@ void app.whenReady().then(async () => {
       saveHistory: async (entry) => history.save(entry as HistoryEntry).id,
     },
   });
-  defineServices(store.value);
+  await defineServices(store.value);
   overlay = new OverlayManager(env);
   cards = new CardService(env, () => store.value.display.screenshot_placement);
   assistant = new AssistantCard(env, () => servicePeer('assistant'), () => store.value.assistant);

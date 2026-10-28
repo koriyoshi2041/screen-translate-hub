@@ -75,6 +75,17 @@ export class AgentCore {
     this.supervisor.define(spec);
   }
 
+  async replaceServices(specs: ServiceSpec[]): Promise<void> {
+    const next = new Map(specs.map(s => [s.name, s]));
+    for (const old of this.supervisor.defined()) {
+      if (JSON.stringify(old) === JSON.stringify(next.get(old.name))) continue;
+      const registered = this.registered.get(old.name);
+      this.registered.delete(old.name);
+      registered?.stream.cancel('service configuration changed');
+    }
+    await this.supervisor.replace(specs);
+  }
+
   setAlias(alias: string, target: string): void {
     this.aliases[alias] = target;
   }

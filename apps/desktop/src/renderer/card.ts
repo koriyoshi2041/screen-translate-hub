@@ -52,7 +52,7 @@ function paint(img: EncodedImage): void {
 
 sth.on((msg) => {
   if (msg.kind === 'settings') {
-    settings = { ...(msg.settings as DisplaySettings), mode: 'plate' };
+    settings = { ...(msg.settings as DisplaySettings) };
     renderer.setSettings(settings);
   } else if (msg.kind === 'view') target = String(msg.target_language);
   else if (msg.kind === 'image') paint(msg.image as EncodedImage);

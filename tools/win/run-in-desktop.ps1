@@ -31,9 +31,13 @@ $log = Join-Path $logDir "$TaskName-$stamp.log"
 $done = "$log.done"
 
 # cmd.exe wrapper: run in WorkDir, capture stdout+stderr, then write the exit code marker.
-$inner = "cd /d `"$WorkDir`" && ($Command) > `"$log`" 2>&1 & echo %ERRORLEVEL% > `"$done`""
+# Separate batch lines expand ERRORLEVEL after the command has actually finished.
+# One compound cmd line expands it early and can report success for a failed test.
+$runner = "$log.cmd"
+$lines = @('@echo off', '@chcp 65001 >nul', "cd /d `"$WorkDir`"", 'if errorlevel 1 goto finished', "$Command > `"$log`" 2>&1", ':finished', "echo %ERRORLEVEL% > `"$done`"")
+[IO.File]::WriteAllText($runner, ($lines -join "`r`n"), (New-Object Text.UTF8Encoding($false)))
 # conhost --headless keeps the console window off the desktop (and out of screenshots).
-$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless cmd.exe /c $inner"
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless cmd.exe /d /c `"`"$runner`"`""
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 72)
 Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
@@ -50,7 +54,9 @@ if (Test-Path $log) { Get-Content $log -Encoding UTF8 }
 if (Test-Path $done) {
   $code = (Get-Content $done | Select-Object -First 1).Trim()
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+  Remove-Item -LiteralPath $runner -ErrorAction SilentlyContinue
   Write-Output "[exit $code]"
+  exit ([int]$code)
 } else {
   Write-Output "[timeout after $TimeoutSec s; task '$TaskName' left running, log: $log]"
 }

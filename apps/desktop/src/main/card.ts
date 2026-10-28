@@ -2,7 +2,7 @@
 // selected area (default, like william's old app) or in a movable card with the
 // original and translated layers (requirement 09 section 3.1).
 import type { CaptureGeometry, DisplayEvent, DisplaySnapshot, Image } from '@sth/model';
-import type { ScreenshotPlacement } from '@sth/render';
+import type { DisplaySettings, ScreenshotPlacement } from '@sth/render';
 import type { Stream } from '@sth/wire';
 import { BrowserWindow, screen } from 'electron';
 import { join } from 'node:path';
@@ -25,6 +25,7 @@ export class CardService {
   private inplace: OverlayHost[] = [];
   private readonly floating = new Set<BrowserWindow>();
   private seq = 0;
+  private readonly updates = new Set<(settings: DisplaySettings) => void>();
 
   constructor(env: WindowEnv, placement: () => ScreenshotPlacement) {
     this.env = env;
@@ -39,7 +40,11 @@ export class CardService {
         const geom = start.image?.geometry as CaptureGeometry | undefined;
         const mode = this.placement();
         target = mode === 'inplace' && geom ? this.inPlace(geom) : this.card(start);
-        target.send({ kind: 'settings', settings: this.env.settings() });
+        const opened = target;
+        const update = (settings: DisplaySettings) => opened.send({ kind: 'settings', settings });
+        this.updates.add(update);
+        opened.onClosed(() => this.updates.delete(update));
+        update(this.env.settings());
         target.send({ kind: 'view', target_language: start.target_language });
         if (mode !== 'inplace' && start.image) target.send({ kind: 'image', image: start.image.image });
         await stream.send({ opened: { card_id: `card-${++this.seq}` } });
@@ -99,7 +104,7 @@ export class CardService {
     win.on('closed', () => this.floating.delete(win));
     void win.loadFile(join(this.env.rendererDir, 'card.html'));
     const ready = new Promise<void>((r) => win.webContents.once('did-finish-load', () => r()));
-    void ready.then(() => win.showInactive());
+    void ready.then(() => { if (!win.isDestroyed()) win.showInactive(); });
     return {
       send: (m) => void ready.then(() => !win.isDestroyed() && win.webContents.send('sth', m)),
       onClosed: (cb) => win.on('closed', cb),
@@ -146,6 +151,10 @@ export class CardService {
       if (!inside) this.dismissInPlace();
     }
     this.wasDown = down;
+  }
+
+  applySettings(settings: DisplaySettings): void {
+    for (const update of this.updates) update(settings);
   }
 
   dismissInPlace(): void {

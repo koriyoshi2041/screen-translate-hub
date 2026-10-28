@@ -12,6 +12,7 @@ export interface Foreground {
 interface Win32 {
   foreground(): Foreground | null;
   idleMs(): number;
+  frame(hwnd: number): { x: number; y: number; w: number; h: number } | null;
 }
 
 async function loadWin32(): Promise<Win32 | null> {
@@ -20,6 +21,9 @@ async function loadWin32(): Promise<Win32 | null> {
     const koffi = (await import('koffi')).default;
     const user32 = koffi.load('user32.dll');
     const kernel32 = koffi.load('kernel32.dll');
+    const dwmapi = koffi.load('dwmapi.dll');
+    const RECT = koffi.struct('A_RECT', { left: 'long', top: 'long', right: 'long', bottom: 'long' });
+    const DwmGetWindowAttribute = dwmapi.func('long __stdcall DwmGetWindowAttribute(intptr hwnd, uint32 attr, _Out_ A_RECT *rect, uint32 size)');
     const LASTINPUTINFO = koffi.struct('A_LASTINPUTINFO', { cbSize: 'uint32', dwTime: 'uint32' });
     const GetForegroundWindow = user32.func('intptr __stdcall GetForegroundWindow()');
     const GetWindowTextW = user32.func('int __stdcall GetWindowTextW(intptr hwnd, _Out_ uint16 *buf, int max)');
@@ -48,6 +52,11 @@ async function loadWin32(): Promise<Win32 | null> {
     };
 
     return {
+      frame(hwnd) {
+        const r = { left: 0, top: 0, right: 0, bottom: 0 };
+        if (DwmGetWindowAttribute(hwnd, 9, r, 16) !== 0) return null;
+        return { x: r.left, y: r.top, w: r.right - r.left, h: r.bottom - r.top };
+      },
       foreground() {
         const hwnd = Number(GetForegroundWindow());
         if (!hwnd) return null;
@@ -78,4 +87,10 @@ export async function foregroundWindow(): Promise<Foreground | null> {
 export async function userIdleMs(): Promise<number> {
   win32 ??= loadWin32();
   return (await win32)?.idleMs() ?? 0;
+}
+
+/** Physical visible bounds; DWM coordinates are independent of the Node process DPI context. */
+export async function windowFrame(hwnd: number): Promise<{ x: number; y: number; w: number; h: number } | null> {
+  win32 ??= loadWin32();
+  return (await win32)?.frame(hwnd) ?? null;
 }

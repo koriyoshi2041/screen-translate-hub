@@ -101,7 +101,7 @@ sth.on((raw) => {
   else if ('brain' in m) onBrain(m.brain);
   else if ('gate' in m) statusEl.textContent = `${new Date(m.gate.at).toLocaleTimeString()} · ${m.gate.wake ? 'looking: ' : ''}${m.gate.reason}`;
   else if ('say' in m) {
-    if (m.say.mode === 'replace') log.replaceChildren();
+    if (m.say.mode === 'replace') { log.replaceChildren(); current = null; tools = null; }
     add('ai', m.say.text);
   }
 });
@@ -116,6 +116,7 @@ function send(): void {
 
 document.getElementById('send')!.addEventListener('click', send);
 text.addEventListener('keydown', (e) => {
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     send();

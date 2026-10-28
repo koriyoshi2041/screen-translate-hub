@@ -25,6 +25,7 @@ export class AssistantCard {
   private stream: Stream<Record<string, unknown>, Record<string, unknown>> | null = null;
   private previous = 0;
   private hasTask = false;
+  private generation = 0;
 
   constructor(env: WindowEnv, peer: () => Promise<Peer>, options: () => AssistantOptions) {
     this.env = env;
@@ -100,25 +101,39 @@ export class AssistantCard {
   /** Open an assistant.Session unless one is running; resolves once it has been asked to start. */
   private ensureSession(): Promise<void> {
     if (this.stream && !this.stream.isFinished) return Promise.resolve();
-    this.starting ??= new Promise<void>((ready) => void this.runSession(ready)).finally(() => (this.starting = null));
+    if (!this.starting) {
+      const pending = new Promise<void>((ready) => void this.runSession(ready, this.generation));
+      this.starting = pending;
+      void pending.finally(() => { if (this.starting === pending) this.starting = null; });
+    }
     return this.starting;
   }
 
-  private async runSession(ready: () => void): Promise<void> {
+  private async runSession(ready: () => void, generation: number): Promise<void> {
     const o = this.options();
+    let peer: Peer | undefined;
+    let stream: Stream<Record<string, unknown>, Record<string, unknown>> | undefined;
+    const current = () => generation === this.generation && this.isOpen;
     try {
-      const peer = await this.peer();
-      const stream = peer.bidi<Record<string, unknown>, Record<string, unknown>>('assistant', 'Session', { deadlineMs: 0 });
+      peer = await this.peer();
+      if (!current()) return;
+      stream = peer.bidi<Record<string, unknown>, Record<string, unknown>>('assistant', 'Session', { deadlineMs: 0 });
       this.stream = stream;
       this.hasTask = false;
       await stream.send({ start: { task: '', heartbeat_ms: o.heartbeat_ms, brain: o.brain, gate: o.gate } });
       ready();
-      for await (const m of stream) this.toCard({ kind: 'assistant', m });
+      for await (const m of stream) if (current()) this.toCard({ kind: 'assistant', m });
     } catch (err) {
       ready();
-      this.toCard({ kind: 'assistant', m: { brain: { type: 'turn_end', stop: 'error', error: `assistant service: ${(err as Error).message}` } } });
+      if (current()) this.toCard({ kind: 'assistant', m: { brain: { type: 'turn_end', stop: 'error', error: `assistant service: ${(err as Error).message}` } } });
+    } finally {
+      ready();
+      peer?.conn?.close();
+      if (current()) {
+        if (this.stream === stream) this.stream = null;
+        this.toCard({ kind: 'assistant', m: { state: { state: 'stopped' } } });
+      }
     }
-    this.toCard({ kind: 'assistant', m: { state: { state: 'stopped' } } });
   }
 
   /** Send a message as if typed into the card (development control). */
@@ -186,6 +201,8 @@ export class AssistantCard {
   }
 
   private stopSession(): void {
+    this.generation++;
+    this.starting = null;
     const s = this.stream;
     this.stream = null;
     if (s && !s.isFinished) {

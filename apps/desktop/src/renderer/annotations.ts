@@ -31,7 +31,7 @@ function draw(): void {
   for (const [k, v] of Object.entries({ id: 'head', viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' })) marker.setAttribute(k, String(v));
   const path = document.createElementNS(NS, 'path');
   path.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
-  path.setAttribute('fill', '#ff5a36');
+  path.setAttribute('fill', 'context-stroke');
   marker.appendChild(path);
   defs.appendChild(marker);
   for (const a of items) {
@@ -45,7 +45,8 @@ function draw(): void {
         width: a.rect.w / scale,
         height: a.rect.h / scale,
         rx: 4,
-        fill: a.kind === 'highlight' ? `${color}33` : 'none',
+        fill: a.kind === 'highlight' ? color : 'none',
+        'fill-opacity': a.kind === 'highlight' ? 0.2 : 1,
         stroke: color,
         'stroke-width': a.kind === 'highlight' ? 0 : 3,
       });

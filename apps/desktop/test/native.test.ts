@@ -10,7 +10,7 @@ import { build } from 'esbuild';
 const root = resolve(import.meta.dirname, '../../..');
 const exec = promisify(execFile);
 for (const scale of [1, 1.5, 2]) {
-  test(`native overlay pixels and first assistant focus at ${scale * 100}%`, { skip: process.platform !== 'win32', timeout: 60_000 }, async () => {
+  test(`native desktop DPI, input, cards, and session lifecycle at ${scale * 100}%`, { skip: process.platform !== 'win32', timeout: 60_000 }, async () => {
     mkdirSync(join(root, 'tmp'), { recursive: true });
     const dir = mkdtempSync(join(root, 'tmp', 'desktop-regression-'));
     const driver = join(dir, 'driver.cjs');

@@ -1,6 +1,6 @@
 // Isolated Electron regression fixture: no capture, real AI, or user settings.
 import assert from 'node:assert/strict';
-import { app, BrowserWindow, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -11,7 +11,8 @@ import { cropImage, selectRegion } from '../src/main/select.ts';
 import { OverlayManager } from '../src/main/overlay.ts';
 import { CardService } from '../src/main/card.ts';
 import { AssistantCard } from '../src/main/assistant-card.ts';
-import { windowFrame } from '../src/main/win32.ts';
+import { SettingsStore } from '../src/main/settings.ts';
+import { hwndOf, windowFrame, windowInfo } from '../src/main/win32.ts';
 
 app.disableHardwareAcceleration();
 app.setPath('userData', join(process.env.STH_DESKTOP_TEST_DIR!, 'profile'));
@@ -66,6 +67,9 @@ void app.whenReady().then(async () => {
     await w.webContents.executeJavaScript("document.getElementById('text').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))");
     await until(() => sent.some(m => m.user_message?.text === '看看'), 'committed Chinese input sends once');
     assert.equal(sent.filter(m => m.user_message).length, 1);
+    await sleep(200);
+    const assistantWindow = windowInfo(hwndOf(w.getNativeWindowHandle()));
+    assert.ok((parseInt(String(assistantWindow.exstyle), 16) & 0x8) !== 0, `assistant remains topmost after returning focus: ${JSON.stringify(assistantWindow)}`);
     w.webContents.send('sth', {kind:'assistant',m:{brain:{type:'text_delta',delta:'old partial'}}});
     w.webContents.send('sth', {kind:'assistant',m:{say:{mode:'replace',text:'replacement note'}}});
     w.webContents.send('sth', {kind:'assistant',m:{brain:{type:'text_delta',delta:'continued answer'}}});
@@ -102,6 +106,7 @@ void app.whenReady().then(async () => {
     const floating = cards.cardWindows()[0];
     if (floating.webContents.isLoading()) await new Promise<void>(r => floating.webContents.once('did-stop-loading', r));
     await until(async () => (await floating.webContents.executeJavaScript('[document.getElementById("img").width,document.getElementById("img").height].join(",")')) === "400,200", "screenshot image delivered");
+    assert.ok((parseInt(String(windowInfo(hwndOf(floating.getNativeWindowHandle())).exstyle), 16) & 0x8) !== 0, 'screenshot controls remain above the reading window');
     cards.applySettings({ ...defaultSettings('overlay'), mode:'dim',brightness:0.25 });
     await sleep(100);
     assert.match(await floating.webContents.executeJavaScript("document.querySelector('.sth-dim').style.background"), /0.75/);
@@ -118,7 +123,42 @@ void app.whenReady().then(async () => {
     assert.deepEqual(await annotations.eval("(() => {const r=document.querySelectorAll('svg rect')[1];return [r.getAttribute('fill'),r.getAttribute('fill-opacity')];})()"), ['red','0.2']);
     disconnect(); await drawing;
     await until(async () => await annotations.eval("document.querySelectorAll('svg rect').length === 0"), 'disconnected session clears its annotations');
+    assert.equal(overlays.visible, true);
+    assert.equal(overlays.toggleVisible(), false);
+    assert.equal(overlays.visible, false, 'menu state follows the visibility toggle');
+    assert.equal(overlays.toggleInteractive(), true);
+    assert.equal(overlays.isInteractive, true, 'menu state follows interactive mode');
     overlays.closeAll();
+
+    // Actual settings renderer: recover from malformed JSON and repeated preset clicks.
+    const store = new SettingsStore(join(process.env.STH_DESKTOP_TEST_DIR!, 'settings'));
+    ipcMain.handle('sth', (_event, msg) => msg.kind === 'get-settings' ? store.value : store.update(msg.patch));
+    const settingsWindow = new BrowserWindow({width:720,height:760,show:false,webPreferences:{preload:env.preload,contextIsolation:true,sandbox:false}});
+    await settingsWindow.loadFile(join(env.rendererDir, 'settings.html'));
+    const js = (code: string) => settingsWindow.webContents.executeJavaScript(code);
+    await until(async () => await js("document.getElementById('translators').value.length > 0"), 'settings load');
+    await js(`document.querySelector('[data-add="claude"]').click()`);
+    assert.equal(await js("JSON.parse(document.getElementById('translators').value).length"), 2, 'existing preset is not duplicated');
+    assert.match(await js("document.getElementById('msg').textContent"), /already configured/);
+    await js(`document.getElementById('translators').value='[';document.querySelector('[data-add="openai"]').click()`);
+    assert.equal(await js("document.activeElement.id"), 'translators');
+    assert.match(await js("document.getElementById('msg').textContent"), /valid JSON/);
+    await js(`document.getElementById('translators').value=${JSON.stringify(JSON.stringify(store.value.translators))};document.getElementById('font_scale').value='100';document.getElementById('save').click()`);
+    await until(async () => await js("document.getElementById('msg').dataset.state === 'error' && !document.getElementById('save').disabled"), 'validation failure shown');
+    const errorText = await js("document.getElementById('msg').textContent");
+    assert.match(errorText, /Not saved:.*Font scale/);
+    assert.doesNotMatch(errorText, /invoking remote method/);
+    await sleep(3200);
+    assert.equal(await js("document.getElementById('msg').textContent"), errorText, 'failure remains until the user can correct it');
+    assert.equal(store.value.display.font_scale, 1, 'invalid values leave saved settings intact');
+    assert.equal(await js("document.querySelector('main').getBoundingClientRect().bottom <= document.querySelector('footer').getBoundingClientRect().top"), true, 'save footer reserves space instead of covering controls');
+    await js("document.getElementById('font_scale').value='1.25';document.getElementById('save').click()");
+    await until(async () => await js("document.getElementById('msg').textContent === 'Saved.'"), 'corrected settings can be saved');
+    assert.equal(store.value.display.font_scale, 1.25);
+    await js("document.getElementById('font_scale').value='1.5';document.getElementById('font_scale').dispatchEvent(new Event('input',{bubbles:true}))");
+    assert.match(await js("document.getElementById('msg').textContent"), /Unsaved changes/);
+    settingsWindow.close();
+    ipcMain.removeHandler('sth');
     writeFileSync(process.env.STH_DESKTOP_TEST_RESULT!, JSON.stringify({ ok: true, scale: screen.getPrimaryDisplay().scaleFactor, bitmap: host.stats.size, native: windowFrame(host.hwnd), firstSummonFocused: true }));
   } catch (e) {
     writeFileSync(process.env.STH_DESKTOP_TEST_RESULT!, JSON.stringify({ ok: false, error: String((e as Error).stack ?? e) }));

@@ -57,6 +57,7 @@ export class AssistantCard {
     win.showInactive();
     win.focus();
     win.webContents.focus();
+    win32.setTopmost(win32.hwndOf(win.getNativeWindowHandle()));
     win.webContents.send('sth', { kind: 'assistant-focus' });
   }
 
@@ -74,20 +75,21 @@ export class AssistantCard {
       frame: false,
       resizable: true,
       skipTaskbar: true,
-      alwaysOnTop: true,
       focusable: false, // never steals focus; the hotkey makes it focusable for a moment
       show: false,
       backgroundColor: '#1f2023',
       webPreferences: { preload: this.env.preload, contextIsolation: true, sandbox: false },
     });
-    win.setAlwaysOnTop(true, 'floating');
     if (!this.env.debugCapturable) win.setContentProtection(true); // the AI never sees its own card
     this.pageReady = new Promise<void>((resolve) => {
       win.webContents.once('did-finish-load', resolve);
       win.once('closed', resolve);
     });
     void win.loadFile(join(this.env.rendererDir, 'assistant.html'));
-    win.once('ready-to-show', () => win.showInactive());
+    win.once('ready-to-show', () => {
+      win.showInactive();
+      win32.setTopmost(win32.hwndOf(win.getNativeWindowHandle()));
+    });
     win.on('closed', () => {
       this.win = null;
       this.pageReady = null;
@@ -155,11 +157,16 @@ export class AssistantCard {
     if (!this.isOpen) return;
     if (this.previous) win32.setForeground(this.previous);
     this.win!.setFocusable(false);
+    // Use native z-order consistently: Electron's floating level can undo it
+    // when offscreen overlay windows coexist with this card.
+    const win = this.win!;
+    win32.setTopmost(win32.hwndOf(win.getNativeWindowHandle()));
     // Changing focusability can make Windows activate another window while
     // processing WM_ACTIVATE. Restore the saved target after that transition.
     const previous = this.previous;
     setTimeout(() => {
       if (previous) win32.setForeground(previous);
+      if (!win.isDestroyed() && this.win === win) win32.setTopmost(win32.hwndOf(win.getNativeWindowHandle()));
     }, 0);
   }
 

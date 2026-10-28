@@ -132,6 +132,10 @@ export class PiBrain implements Brain {
   }
 
   async *wake(ev: WakeEvent, signal: AbortSignal): AsyncIterable<BrainEvent> {
+    if (signal.aborted) {
+      yield { type: 'turn_end', stop: 'cancelled' };
+      return;
+    }
     const session = this.session;
     if (!session) {
       yield { type: 'turn_end', stop: 'error', error: 'pi session not open' };

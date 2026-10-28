@@ -124,3 +124,18 @@ test('tile changes count changed 16 px tiles', () => {
   b.data[(20 * 64 + 40) * 4] = 200; // one pixel in tile (2, 1)
   assert.deepEqual(tileChanges(a, b), { changed: 1, total: 8 });
 });
+
+test('card notes are saved and stop waits for the last answer to enter history', async () => {
+  const { s, brain } = makeSession();
+  brain.wake = async function* () {
+    yield { type: 'text_delta', delta: 'complete answer' };
+    await new Promise(r => setTimeout(r, 30));
+    yield { type: 'turn_end', stop: 'done' };
+  };
+  await s.start();
+  await s.tools.find(t => t.name === 'say')!.execute({ text: 'a visible note' });
+  s.userMessage('look');
+  await tick();
+  await s.stop();
+  assert.deepEqual(s.transcript.filter(e => e.who === 'assistant').map(e => e.text), ['a visible note', 'complete answer']);
+});

@@ -89,7 +89,9 @@ export class SettingsStore {
   }
 
   update(patch: Patch<Settings>): Settings {
-    this.value = merge(this.value, patch);
+    const next = merge(this.value, patch);
+    validateSettings(next);
+    this.value = next;
     this.save();
     return this.value;
   }
@@ -155,4 +157,29 @@ function defaultWorkflows(s: Settings): { screenshot: WorkflowDoc; continuous: W
     return d;
   };
   return { screenshot: build(screenshotTemplate(s.target_language)), continuous: build(continuousTemplate(s.target_language)) };
+}
+
+/** Validate before touching the saved configuration or restarting services. */
+export function validateSettings(s: Settings): void {
+  if (!s || typeof s.target_language !== 'string' || !s.target_language.trim()) throw new Error('Choose a target language.');
+  if (!Array.isArray(s.translators) || s.translators.length === 0) throw new Error('Configure at least one translation source.');
+  const names = new Set<string>();
+  for (const t of s.translators) {
+    if (!t || typeof t.name !== 'string' || !t.name.trim() || !['claude-cli','openai','anthropic','bergamot','mock'].includes(t.engine)) throw new Error('Each source needs a name and a supported engine.');
+    if (names.has(t.name)) throw new Error(`Translation source names must be unique: ${t.name}`);
+    names.add(t.name);
+  }
+  const number = (name: string, value: number, min: number, max: number) => {
+    if (!Number.isFinite(value) || value < min || value > max) throw new Error(`${name} must be between ${min} and ${max}.`);
+  };
+  number('Capture interval', s.continuous?.interval_ms, 100, 60000);
+  number('Heartbeat interval', s.assistant?.heartbeat_ms, 1000, 3600000);
+  number('Viewer port', s.viewer?.port, 1, 65535);
+  if (!Number.isInteger(s.viewer.port)) throw new Error('Viewer port must be an integer.');
+  number('Plate opacity', s.display?.plate_opacity, 0, 1);
+  number('Brightness', s.display?.brightness, 0, 1);
+  number('Font scale', s.display?.font_scale, 0.5, 3);
+  number('Minimum font size', s.display?.min_font_px, 6, 40);
+  if (!['plate','dim'].includes(s.display.mode) || !['inplace','card'].includes(s.display.screenshot_placement)) throw new Error('Choose a supported display mode and screenshot placement.');
+  if (typeof s.viewer.access_token !== 'string' || !s.viewer.access_token.trim()) throw new Error('Set a viewer access code.');
 }

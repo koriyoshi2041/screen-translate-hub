@@ -88,8 +88,10 @@ export class ClaudeCodeBrain implements Brain {
   /** A task set since the process started, not yet told to the model. */
   private taskNote: string | null = null;
   private stderr = '';
+  private readonly launch: typeof spawn;
 
-  constructor(cfg: ClaudeBrainConfig) {
+  constructor(cfg: ClaudeBrainConfig, privateLaunch: typeof spawn = spawn) {
+    this.launch = privateLaunch;
     this.cfg = cfg;
   }
 
@@ -107,6 +109,7 @@ export class ClaudeCodeBrain implements Brain {
   private start(): void {
     // a new process gets the current task in its system prompt
     this.taskNote = null;
+    this.stderr = '';
     const mcpScript = join(dirname(fileURLToPath(import.meta.url)), 'mcp.ts');
     const mcpConfig = join(this.dir, 'mcp.json');
     // the session token goes into a file in a private temp directory rather than onto a command line
@@ -137,7 +140,7 @@ export class ClaudeCodeBrain implements Brain {
       '--verbose',
       '--system-prompt', systemPrompt(this.task),
     ];
-    const proc = spawn(this.cfg.command ?? 'claude', args, { cwd: this.dir, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const proc = this.launch(this.cfg.command ?? 'claude', args, { cwd: this.dir, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     this.proc = proc;
     const lines = new Lines();
     this.lines = lines;
@@ -166,13 +169,18 @@ export class ClaudeCodeBrain implements Brain {
   }
 
   async *wake(ev: WakeEvent, signal: AbortSignal): AsyncIterable<BrainEvent> {
+    if (signal.aborted) {
+      yield { type: 'turn_end', stop: 'cancelled' };
+      return;
+    }
     if (!this.proc || this.proc.exitCode !== null || this.lines.ended) this.start();
     const proc = this.proc!;
     const lines = this.lines;
+    let abortTimer: ReturnType<typeof setTimeout> | undefined;
     const onAbort = () => {
       // ask Claude Code to stop the turn; if it does not, end the process (the next wake restarts it)
       proc.stdin?.write(`${JSON.stringify({ type: 'control_request', request_id: `int-${Date.now()}`, request: { subtype: 'interrupt' } })}\n`);
-      setTimeout(() => {
+      abortTimer = setTimeout(() => {
         if (!lines.ended && signal.aborted) proc.kill();
       }, 3000).unref();
     };
@@ -214,6 +222,7 @@ export class ClaudeCodeBrain implements Brain {
         }
       }
     } finally {
+      clearTimeout(abortTimer);
       signal.removeEventListener('abort', onAbort);
     }
   }

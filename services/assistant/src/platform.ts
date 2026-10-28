@@ -1,9 +1,10 @@
 // What the assistant can reach on this computer: screen capture, OCR and normalization,
 // the current translations and the overlay's annotation layer, all through the agent.
-import type { Annotation, CaptureRange, DisplaySnapshot, EncodedImage, Image, OcrResult, Unit } from '@sth/model';
+import { randomUUID } from 'node:crypto';
+import type { Annotation, CaptureGeometry, CaptureRange, DisplaySnapshot, EncodedImage, Image, OcrResult, Unit } from '@sth/model';
 import type { Clients } from '@sth/service-kit';
 import type { Stream } from '@sth/wire';
-import { foregroundWindow } from './win.ts';
+import { foregroundWindow, windowFrame } from './win.ts';
 
 export interface ScreenRect { x: number; y: number; w: number; h: number }
 
@@ -20,8 +21,13 @@ export class Platform {
   private annotateStream: Stream<unknown, unknown> | null = null;
   private readonly annotations = new Map<string, Annotation>();
   private nextAnnotation = 1;
+  private readonly annotationPrefix = randomUUID();
+  private lastWindow = 0;
+  private closed = false;
+  private readonly windows: { foreground: typeof foregroundWindow; frame: typeof windowFrame };
 
-  constructor(clients: Clients, range: CaptureRange, ownPids: number[]) {
+  constructor(clients: Clients, range: CaptureRange, ownPids: number[], windows = { foreground: foregroundWindow, frame: windowFrame }) {
+    this.windows = windows;
     this.clients = clients;
     this.range = range;
     this.ownPids = ownPids;
@@ -39,15 +45,25 @@ export class Platform {
     else if (this.range.window_id) target = { window_id: this.range.window_id };
     else if (this.range.region) target = { region: this.range.region };
     else if (this.range.follow_active_window) {
-      const fg = await foregroundWindow();
-      if (fg && !this.ownPids.includes(fg.pid)) target = { window_id: fg.hwnd };
-    }
-    return capture.unary<Record<string, unknown>, Image>('capture', 'Grab', { ...target, format: 'raw_bgra8' }, { deadlineMs: 10_000 });
+      const fg = await this.windows.foreground();
+      if (fg && !this.ownPids.includes(fg.pid)) this.lastWindow = fg.hwnd;
+      if (this.lastWindow) target = { window_id: this.lastWindow };
+    } else if (this.range.display_id) target = { display_id: this.range.display_id };
+    const img = await capture.unary<Record<string, unknown>, Image>('capture', 'Grab', { ...target, format: 'raw_bgra8' }, { deadlineMs: 10_000 });
+    if (img.geometry) return { ...img, geometry: await this.screenGeometry(img.geometry) };
+    return img;
+  }
+
+  private async screenGeometry(g: CaptureGeometry): Promise<CaptureGeometry> {
+    if (g.kind !== 'window' || !g.window_id) return g;
+    const frame = await this.windows.frame(g.window_id);
+    if (!frame) throw new Error('The observed window has closed; capture the current window again.');
+    return { ...g, kind: 'region', origin_x: frame.x + g.origin_x, origin_y: frame.y + g.origin_y };
   }
 
   /** OCR and normalization of a frame; paragraph rectangles in screen pixels. */
   async read(img: Image): Promise<Paragraph[]> {
-    const g = img.geometry!;
+    const g = await this.screenGeometry(img.geometry!);
     const e = img.image as EncodedImage;
     const ocr = await (await this.peer('bundled.ocr')).unary<unknown, OcrResult>(
       'ocr',
@@ -74,7 +90,7 @@ export class Platform {
     const r = await coord.unary<unknown, { snapshot: DisplaySnapshot | null }>('coordinator', 'GetDisplay', {}, { deadlineMs: 5_000 });
     const snap = r.snapshot;
     if (!snap) return null;
-    const g = snap.geometry;
+    const g = snap.geometry ? await this.screenGeometry(snap.geometry) : undefined;
     const W = g?.width ?? 1;
     const H = g?.height ?? 1;
     return [...snap.held, ...snap.paragraphs].map(({ paragraph: p, shown }) => ({
@@ -91,6 +107,7 @@ export class Platform {
   }
 
   private async annotateCall(): Promise<Stream<unknown, unknown>> {
+    if (this.closed) throw new Error('Assistant session is closed');
     if (this.annotateStream && !this.annotateStream.isFinished) return this.annotateStream;
     this.annotateStream = this.clients.agentService('overlay').open<unknown, unknown>('overlay', 'Annotate', { deadlineMs: 0 });
     return this.annotateStream;
@@ -98,9 +115,11 @@ export class Platform {
 
   /** Draw annotations on the overlay's annotation layer; returns their ids. */
   async annotate(items: Array<Omit<Annotation, 'id'>>): Promise<string[]> {
-    const withIds = items.map((a) => ({ anchor: 'screen' as const, ...a, id: `a${this.nextAnnotation++}` }));
+    const stream = await this.annotateCall();
+    if (this.closed) throw new Error('Assistant session is closed');
+    const withIds = items.map((a) => ({ anchor: 'screen' as const, ...a, id: `${this.annotationPrefix}-${this.nextAnnotation++}` }));
     for (const a of withIds) this.annotations.set(a.id, a);
-    await (await this.annotateCall()).send({ set: withIds });
+    await stream.send({ set: withIds });
     return withIds.map((a) => a.id);
   }
 
@@ -114,6 +133,7 @@ export class Platform {
 
   /** Session end: remove this session's annotations and close the layer stream. */
   async close(): Promise<void> {
+    this.closed = true;
     await this.clearAnnotations().catch(() => undefined);
     if (this.annotateStream && !this.annotateStream.isFinished) this.annotateStream.halfClose();
     this.annotateStream = null;

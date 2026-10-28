@@ -64,3 +64,22 @@ test('a missing command ends once and is retried with backoff', async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('changing configuration starts the new source and removes disabled sources', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sth-supervisor-config-'));
+  const { s } = supervisor(dir);
+  const first = join(dir, 'first'), second = join(dir, 'second');
+  const spec = (mark: string): ServiceSpec => ({ name:'probe', command:process.execPath, args:['-e',`require('fs').writeFileSync(${JSON.stringify(mark)}, 'ok'); process.stdin.resume()`], cwd:dir });
+  try {
+    s.define(spec(first)); s.ensure('probe');
+    await until(() => existsSync(first));
+    await s.replace([spec(second)]);
+    s.ensure('probe');
+    await until(() => existsSync(second));
+    assert.equal(s.isRunning('probe'),true);
+    await s.replace([]);
+    assert.equal(s.has('probe'),false);
+    assert.equal(s.isRunning('probe'),false);
+    assert.throws(() => s.ensure('probe'),/no service defined/);
+  } finally { s.stopAll(); await until(() => !s.isRunning('probe')); rmSync(dir,{recursive:true,force:true}); }
+});

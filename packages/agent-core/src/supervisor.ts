@@ -43,6 +43,26 @@ export class Supervisor {
     this.specs.set(spec.name, spec);
   }
 
+  /** Replace the catalog, restarting only changed services and removing disabled ones. */
+  async replace(specs: ServiceSpec[]): Promise<void> {
+    const next = new Map(specs.map(s => [s.name, s]));
+    const closing: Promise<void>[] = [];
+    for (const [name, spec] of this.specs) {
+      if (JSON.stringify(spec) === JSON.stringify(next.get(name))) continue;
+      const p = this.procs.get(name);
+      this.specs.delete(name);
+      if (p) {
+        const child = p.child;
+        const closed = child ? new Promise<void>(resolve => child.once('close', () => resolve())) : Promise.resolve();
+        this.stop(name);
+        this.procs.delete(name);
+        closing.push(closed.then(() => { p.log?.end(); }));
+      }
+    }
+    await Promise.all(closing);
+    for (const spec of specs) this.define(spec);
+  }
+
   defined(): ServiceSpec[] {
     return [...this.specs.values()];
   }

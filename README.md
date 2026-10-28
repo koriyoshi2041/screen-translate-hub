@@ -49,7 +49,7 @@ Run the checks with:
 npm.cmd test                 # TypeScript packages and viewer-page regressions
 npm.cmd run test:py           # Python services
 npm.cmd run typecheck
-npm.cmd run test:desktop      # Build, native overlay DPI and assistant focus regressions
+npm.cmd run test:desktop      # Build; DPI, Chinese input, screenshot cards, and assistant lifecycle regressions
 node tools/dev/e2e.ts both mock           # Isolated pipeline, synthetic frames
 node tools/dev/e2e.ts screenshot claude   # Real translation using local Claude Code
 ```

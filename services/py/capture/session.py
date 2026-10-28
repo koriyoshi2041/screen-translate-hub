@@ -29,6 +29,7 @@ class CaptureSession:
         self._loop = loop
         self._lock = threading.Lock()
         self._ref: np.ndarray | None = None
+        self._ref_geometry: dict | None = None
         self._pend: tuple[np.ndarray, dict, str] | None = None
         self._batch_frame: np.ndarray | None = None
         self._n = 0
@@ -44,9 +45,10 @@ class CaptureSession:
         if self._paused:
             return
         with self._lock:
-            if self._ref is None or differs(frame, self._ref, self.tol):
+            if self._ref is None or geometry != self._ref_geometry or differs(frame, self._ref, self.tol):
                 self._pend = (frame, geometry, captured_at)
                 self._ref = frame
+                self._ref_geometry = dict(geometry)
                 self.accepted += 1
                 accepted = True
             else:

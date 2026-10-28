@@ -154,12 +154,19 @@ export class OverlayManager {
 
   /** overlay.Annotate: assistant annotations in screen coordinates (spec 17 section 7). */
   annotate = async (stream: Stream): Promise<void> => {
-    for await (const m of stream as Stream<{ set?: Annotation[]; clear?: { ids?: string[] } }, unknown>) {
-      if (m.set) for (const a of m.set) this.annotations.set(a.id, a);
-      if (m.clear) {
-        if (m.clear.ids?.length) for (const id of m.clear.ids) this.annotations.delete(id);
-        else this.annotations.clear();
+    const owned = new Set<string>();
+    try {
+      for await (const m of stream as Stream<{ set?: Annotation[]; clear?: { ids?: string[] } }, unknown>) {
+        if (m.set) for (const a of m.set) { this.annotations.set(a.id, a); owned.add(a.id); }
+        if (m.clear) {
+          const ids = m.clear.ids?.length ? m.clear.ids : [...owned];
+          for (const id of ids) if (owned.delete(id)) this.annotations.delete(id);
+        }
+        this.pushAnnotations();
       }
+    } finally {
+      // A disconnected assistant must not leave drawings stuck on the desktop.
+      for (const id of owned) this.annotations.delete(id);
       this.pushAnnotations();
     }
   };

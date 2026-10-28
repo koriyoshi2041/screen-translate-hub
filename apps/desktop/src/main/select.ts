@@ -20,8 +20,9 @@ export function cropImage(img: Image, r: PhysicalRect): Image {
   const g = img.geometry!;
   const x0 = Math.max(0, Math.round(r.x - g.origin_x));
   const y0 = Math.max(0, Math.round(r.y - g.origin_y));
-  const w = Math.min(src.width - x0, r.w);
-  const h = Math.min(src.height - y0, r.h);
+  const w = Math.min(src.width, Math.round(r.x - g.origin_x + r.w)) - x0;
+  const h = Math.min(src.height, Math.round(r.y - g.origin_y + r.h)) - y0;
+  if (w <= 0 || h <= 0) throw new Error('The selection is outside the captured display');
   const out = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; y++) {
     const from = ((y0 + y) * src.width + x0) * 4;
@@ -34,11 +35,12 @@ export function cropImage(img: Image, r: PhysicalRect): Image {
   };
 }
 
-export function selectRegion(env: WindowEnv, grabDisplay: () => Promise<Image>): Promise<Selection | null> {
+export function selectRegion(env: WindowEnv, grabDisplay: (rect: PhysicalRect) => Promise<Image>): Promise<Selection | null> {
   if (active) return active;
   active = (async () => {
-    const frozen = await grabDisplay();
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const b = screen.dipToScreenRect(null, display.bounds);
+    const frozen = await grabDisplay({ x: b.x, y: b.y, w: b.width, h: b.height });
     return new Promise<Selection | null>((resolve) => {
       const win = new BrowserWindow({
         ...display.bounds,
@@ -81,6 +83,6 @@ export function selectRegion(env: WindowEnv, grabDisplay: () => Promise<Image>):
         win.focus();
       });
     });
-  })();
+  })().finally(() => { active = null; });
   return active;
 }

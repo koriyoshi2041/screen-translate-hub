@@ -36,6 +36,7 @@ export class AssistantSession {
   private lastFrame: EncodedImage | null = null;
   private pending: WakeEvent | null = null;
   private running: AbortController | null = null;
+  private turn: Promise<void> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private sampling = false;
   private readonly gateLog: Array<GateDecision & { at: string }> = [];
@@ -50,12 +51,17 @@ export class AssistantSession {
       platform: d.platform,
       task: () => this.task,
       recentGate: () => this.gateLog,
-      say: (text, mode) => this.d.emit({ say: { text, mode } }),
+      say: (text, mode) => {
+        if (this.state === 'paused' || this.state === 'stopped') return;
+        this.transcript.push({ at: new Date().toISOString(), who: 'assistant', text });
+        this.d.emit({ say: { text, mode } });
+      },
     });
   }
 
   async start(): Promise<void> {
     await this.d.brain.open(this.task, this.tools);
+    if (this.state === 'stopped') { await this.d.brain.close(); return; }
     this.setState('watching');
     this.schedule();
   }
@@ -109,7 +115,7 @@ export class AssistantSession {
       else if (ev.kind === 'user_message' || this.pending?.kind !== 'user_message') this.pending = ev;
       return;
     }
-    void this.runTurn(ev);
+    this.turn = this.runTurn(ev);
   }
 
   userMessage(text: string): void {
@@ -142,7 +148,7 @@ export class AssistantSession {
       if (this.state === 'thinking') this.setState('watching');
       const next = this.pending;
       this.pending = null;
-      if (next && this.state === 'watching') void this.runTurn(next);
+      if (next && this.state === 'watching') this.turn = this.runTurn(next);
     }
   }
 
@@ -173,6 +179,7 @@ export class AssistantSession {
     this.pending = null;
     this.setState('stopped');
     await this.d.brain.close().catch(() => undefined);
+    await this.turn; // finish the last transcript entry before history is saved
     await this.d.platform.close().catch(() => undefined);
   }
 }

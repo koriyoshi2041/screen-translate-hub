@@ -40,7 +40,7 @@ jobs:
         run: npm.cmd test
       - name: Python services
         run: npm.cmd run test:py
-      - name: Build desktop application
-        run: node apps/desktop/build.mjs
+      - name: Build and check desktop DPI and focus
+        run: npm.cmd run test:desktop
       - name: Synthetic screenshot and continuous pipeline
         run: node tools/dev/e2e.ts both mock

@@ -140,6 +140,12 @@ export class AssistantCard {
     if (!this.isOpen) return;
     if (this.previous) win32.setForeground(this.previous);
     this.win!.setFocusable(false);
+    // Changing focusability can make Windows activate another window while
+    // processing WM_ACTIVATE. Restore the saved target after that transition.
+    const previous = this.previous;
+    setTimeout(() => {
+      if (previous) win32.setForeground(previous);
+    }, 0);
   }
 
   /** A button of the card, pressed through the dev control (pause, resume, clear, stop). */

@@ -52,6 +52,7 @@ class WgcSource:
         self._crop: tuple[int, int, int, int] | None = None
         self._follow = bool(capture_range.get("follow_active_window"))
         self._follow_thread: threading.Thread | None = None
+        self._window_size: tuple[int, int] | None = None
 
     # ---- FrameSource ----
 
@@ -60,9 +61,10 @@ class WgcSource:
         self._stopping = False
         if self._follow:
             self._hwnd = self._pick_foreground() or None
+        self._open()
+        if self._follow or self.range.get("window_id"):
             self._follow_thread = threading.Thread(target=self._follow_loop, daemon=True)
             self._follow_thread.start()
-        self._open()
 
     def stop(self) -> None:
         self._stopping = True
@@ -85,10 +87,22 @@ class WgcSource:
     def _follow_loop(self) -> None:
         while not self._stopping:
             time.sleep(0.3)
-            h = self._pick_foreground()
-            if h and h != self._hwnd:
-                self._hwnd = h
-                self.restart()
+            if not self._stopping:
+                self._check_window()
+
+    def _check_window(self) -> None:
+        h = self._pick_foreground() if self._follow else self._hwnd
+        if not h or self._stopping:
+            return
+        frame = win32.window_frame(h)
+        if not frame or frame[2] <= 0 or frame[3] <= 0:
+            return
+        size = (frame[2], frame[3])
+        # WGC's frame pool can retain the initial dimensions after a resize.
+        # Reopen it so the next frame and its geometry cover the new client area.
+        if h != self._hwnd or size != self._window_size:
+            self._hwnd = h
+            self.restart()
 
     def _open(self) -> None:
         from windows_capture import WindowsCapture
@@ -104,6 +118,8 @@ class WgcSource:
                 self._closed("TARGET_CLOSED")
                 return
             self._hwnd = hwnd
+            frame = win32.window_frame(hwnd)
+            self._window_size = (frame[2], frame[3]) if frame else None
             kwargs["window_hwnd"] = hwnd
         elif r.get("region"):
             reg = r["region"]
@@ -133,7 +149,8 @@ class WgcSource:
                     self._closed("TARGET_CLOSED")
 
         with self._lock:
-            self._ctl = cap.start_free_threaded()
+            if not self._stopping:
+                self._ctl = cap.start_free_threaded()
 
     def _deliver(self, buf: np.ndarray) -> None:
         if self._crop is not None:

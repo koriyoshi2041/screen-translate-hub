@@ -1,0 +1,46 @@
+name: Windows checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: services/py/requirements.txt
+      - name: Install Node dependencies
+        run: npm.cmd ci
+      - name: Create Python environment
+        run: python -m venv .venv
+      - name: Install Python dependencies
+        run: .venv\Scripts\python -m pip install -r services/py/requirements.txt
+      - name: Type check
+        run: npm.cmd run typecheck
+      - name: TypeScript and viewer-page regressions
+        run: npm.cmd test
+      - name: Python services
+        run: npm.cmd run test:py
+      - name: Build desktop application
+        run: node apps/desktop/build.mjs
+      - name: Synthetic screenshot and continuous pipeline
+        run: node tools/dev/e2e.ts both mock

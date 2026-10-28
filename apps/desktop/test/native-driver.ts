@@ -21,6 +21,7 @@ const until = async (f: () => boolean, description: string) => {
 };
 
 void app.whenReady().then(async () => {
+
   let host: OverlayHost | undefined;
   let card: AssistantCard | undefined;
   try {
@@ -32,7 +33,11 @@ void app.whenReady().then(async () => {
       settings: () => defaultSettings('overlay'),
     };
     host = new OverlayHost(env, { x: 40, y: 40, w: 900, h: 600 }, { topmost: false });
+
+    await host.eval("document.body.style.background='#fafafa';document.getElementById('root').textContent='Synthetic DPI fixture'");
+
     await until(() => host!.stats.paints > 0, 'overlay paint');
+
     assert.deepEqual(host.stats.size, [900, 600], 'bitmap must use physical pixels');
     assert.equal(windowFrame(host.hwnd)?.w, 900, 'native width');
     assert.equal(windowFrame(host.hwnd)?.h, 600, 'native height');
@@ -51,9 +56,10 @@ void app.whenReady().then(async () => {
       async *[Symbol.asyncIterator]() { await finished; },
     };
     card = new AssistantCard(env, async () => ({ bidi: () => stream }) as unknown as Peer, () => ({ heartbeat_ms: 4000, brain: 'mock', gate: 'rules' }));
+
     await card.summon();
+
     const w = card.window()!;
-    if (w.webContents.isLoading()) await new Promise<void>((resolve) => w.webContents.once('did-finish-load', resolve));
     assert.equal(await w.webContents.executeJavaScript('document.activeElement.id'), 'text', 'first summon focuses the input after loading');
     writeFileSync(process.env.STH_DESKTOP_TEST_RESULT!, JSON.stringify({ ok: true, scale: screen.getPrimaryDisplay().scaleFactor, bitmap: host.stats.size, native: windowFrame(host.hwnd), firstSummonFocused: true }));
   } catch (e) {

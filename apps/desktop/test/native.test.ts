@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -23,7 +23,7 @@ for (const scale of [1, 1.5, 2]) {
       try {
         await exec(electron, [driver, `--force-device-scale-factor=${scale}`], { cwd: root, env, timeout: 45_000 });
       } catch (error) {
-        try { assert.equal(JSON.parse(readFileSync(result, 'utf8')).ok, true, readFileSync(result, 'utf8')); } catch (diagnostic) { throw diagnostic; }
+        if (existsSync(result)) assert.equal(JSON.parse(readFileSync(result, 'utf8')).ok, true, readFileSync(result, 'utf8'));
         throw error;
       }
       const actual = JSON.parse(readFileSync(result, 'utf8'));

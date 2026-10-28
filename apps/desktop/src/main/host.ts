@@ -53,9 +53,15 @@ export class OverlayHost {
     this.osr.webContents.setFrameRate(30);
     this.osr.webContents.on('paint', (_e, _dirty, image) => {
       if (this.closed) return;
-      this.lastFrame = image;
-      const { width, height } = image.getSize();
-      const bmp = image.toBitmap();
+      // NativeImage's default bitmap is at scale 1, even when the offscreen
+      // window lives on a HiDPI display. UpdateLayeredWindow takes physical
+      // pixels: normalize the bitmap to the capture bounds before uploading it.
+      const { w, h } = this.bounds;
+      const size = image.getSize();
+      const frame = size.width === w && size.height === h ? image : image.resize({ width: w, height: h, quality: 'best' });
+      this.lastFrame = frame;
+      const { width, height } = frame.getSize();
+      const bmp = frame.toBitmap();
       this.stats.paints++;
       this.stats.size = [width, height];
       this.stats.error = this.surface.update(bmp, width, height);

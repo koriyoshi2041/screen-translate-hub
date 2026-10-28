@@ -21,6 +21,7 @@ export class AssistantCard {
   private readonly peer: () => Promise<Peer>;
   private readonly options: () => AssistantOptions;
   private win: BrowserWindow | null = null;
+  private pageReady: Promise<void> | null = null;
   private stream: Stream<Record<string, unknown>, Record<string, unknown>> | null = null;
   private previous = 0;
   private hasTask = false;
@@ -49,6 +50,8 @@ export class AssistantCard {
     if (fg && win32.windowPid(fg) !== process.pid) this.previous = fg;
     void this.ensureSession();
     const win = this.win!;
+    await this.pageReady;
+    if (win.isDestroyed() || this.win !== win) return;
     win.setFocusable(true);
     win.showInactive();
     win.focus();
@@ -78,10 +81,15 @@ export class AssistantCard {
     });
     win.setAlwaysOnTop(true, 'floating');
     if (!this.env.debugCapturable) win.setContentProtection(true); // the AI never sees its own card
+    this.pageReady = new Promise<void>((resolve) => {
+      win.webContents.once('did-finish-load', resolve);
+      win.once('closed', resolve);
+    });
     void win.loadFile(join(this.env.rendererDir, 'assistant.html'));
     win.once('ready-to-show', () => win.showInactive());
     win.on('closed', () => {
       this.win = null;
+      this.pageReady = null;
       this.stopSession();
     });
     this.win = win;
@@ -120,14 +128,18 @@ export class AssistantCard {
   }
 
   private toCard(msg: unknown): void {
-    if (this.isOpen) this.win!.webContents.send('sth', msg);
+    const win = this.win;
+    if (!win || win.isDestroyed()) return;
+    void this.pageReady?.then(() => {
+      if (this.win === win && !win.isDestroyed()) win.webContents.send('sth', msg);
+    });
   }
 
   /** Give the keyboard back to the window the user was in. */
   private releaseFocus(): void {
     if (!this.isOpen) return;
-    this.win!.setFocusable(false);
     if (this.previous) win32.setForeground(this.previous);
+    this.win!.setFocusable(false);
   }
 
   /** A button of the card, pressed through the dev control (pause, resume, clear, stop). */

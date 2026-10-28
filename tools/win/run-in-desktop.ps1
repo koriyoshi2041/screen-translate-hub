@@ -30,11 +30,12 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 $log = Join-Path $logDir "$TaskName-$stamp.log"
 $done = "$log.done"
 
-# cmd.exe wrapper: run in WorkDir, capture stdout+stderr, then write the exit code marker.
-# Separate batch lines expand ERRORLEVEL after the command has actually finished.
-# One compound cmd line expands it early and can report success for a failed test.
+# Call a separate payload batch so .cmd tools return before the exit-code marker.
+# Keep the command out of CALL's argument list, which would expand it a second time.
 $runner = "$log.cmd"
-$lines = @('@echo off', '@chcp 65001 >nul', "cd /d `"$WorkDir`"", 'if errorlevel 1 goto finished', "$Command > `"$log`" 2>&1", ':finished', "echo %ERRORLEVEL% > `"$done`"")
+$payload = "$log.command.cmd"
+[IO.File]::WriteAllText($payload, ("@echo off`r`n" + $Command + "`r`n"), (New-Object Text.UTF8Encoding($false)))
+$lines = @('@echo off', '@chcp 65001 >nul', "cd /d `"$WorkDir`"", 'if errorlevel 1 goto finished', "call `"$payload`" > `"$log`" 2>&1", ':finished', "echo %ERRORLEVEL% > `"$done`"")
 [IO.File]::WriteAllText($runner, ($lines -join "`r`n"), (New-Object Text.UTF8Encoding($false)))
 # conhost --headless keeps the console window off the desktop (and out of screenshots).
 $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless cmd.exe /d /c `"`"$runner`"`""
@@ -54,7 +55,7 @@ if (Test-Path $log) { Get-Content $log -Encoding UTF8 }
 if (Test-Path $done) {
   $code = (Get-Content $done | Select-Object -First 1).Trim()
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-  Remove-Item -LiteralPath $runner -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $runner, $payload -ErrorAction SilentlyContinue
   Write-Output "[exit $code]"
   exit ([int]$code)
 } else {

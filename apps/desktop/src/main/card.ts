@@ -93,7 +93,6 @@ export class CardService {
       resizable: true,
       focusable: false, // floating cards never take focus (requirement 01 section 5.3)
       skipTaskbar: true,
-      alwaysOnTop: true,
       backgroundColor: '#202124',
       show: false,
       webPreferences: { preload: this.env.preload, contextIsolation: true, sandbox: false },
@@ -104,7 +103,11 @@ export class CardService {
     win.on('closed', () => this.floating.delete(win));
     void win.loadFile(join(this.env.rendererDir, 'card.html'));
     const ready = new Promise<void>((r) => win.webContents.once('did-finish-load', () => r()));
-    void ready.then(() => { if (!win.isDestroyed()) win.showInactive(); });
+    void ready.then(() => {
+      if (win.isDestroyed()) return;
+      win.showInactive();
+      win32.setTopmost(win32.hwndOf(win.getNativeWindowHandle()));
+    });
     return {
       send: (m) => void ready.then(() => !win.isDestroyed() && win.webContents.send('sth', m)),
       onClosed: (cb) => win.on('closed', cb),

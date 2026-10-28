@@ -166,6 +166,11 @@ export function placeAbove(hwnd: number, target: number): void {
   }
 }
 
+/** Keep a floating control reachable without taking keyboard focus. */
+export function setTopmost(hwnd: number): void {
+  SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
 /** Tool window (not in the taskbar or Alt+Tab) that never activates. */
 export function makeToolWindow(hwnd: number): void {
   const ex = Number(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));

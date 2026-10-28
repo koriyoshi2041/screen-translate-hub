@@ -181,6 +181,10 @@ export class OverlayManager {
     this.annotationHost.send({ kind: 'annotations', items, origin: { x: b.x, y: b.y }, scale: screen.getPrimaryDisplay().scaleFactor || 1 });
   }
 
+  get visible(): boolean { return !this.hidden; }
+
+  get isInteractive(): boolean { return this.interactive; }
+
   toggleVisible(): boolean {
     this.hidden = !this.hidden;
     this.current?.setUserHidden(this.hidden);

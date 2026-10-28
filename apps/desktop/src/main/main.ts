@@ -192,8 +192,8 @@ function refreshTray(): void {
       { label: st === 'paused' ? 'Resume' : 'Pause', enabled: st === 'running' || st === 'paused', click: () => void toggleContinuous() },
       { label: 'Stop', enabled: st === 'running' || st === 'paused', click: () => void stopContinuous() },
       { type: 'separator' },
-      { label: 'Show translations', type: 'checkbox', checked: true, click: () => overlay.toggleVisible() },
-      { label: 'Interactive overlay', type: 'checkbox', checked: false, click: () => overlay.toggleInteractive() },
+      { label: 'Show translations', type: 'checkbox', checked: overlay.visible, click: () => toggleOverlayVisible() },
+      { label: 'Interactive overlay', type: 'checkbox', checked: overlay.isInteractive, click: () => toggleOverlayInteractive() },
       { label: `AI assistant\t${s.hotkeys.assistant}`, click: () => void assistant.summon() },
       { type: 'separator' },
       { label: 'Share to LAN viewers', type: 'checkbox', checked: s.sharing, click: (i) => setSharing(i.checked) },
@@ -219,6 +219,18 @@ function setSharing(on: boolean): void {
   refreshTray();
 }
 
+function toggleOverlayVisible(): boolean {
+  const visible = overlay.toggleVisible();
+  refreshTray();
+  return visible;
+}
+
+function toggleOverlayInteractive(): boolean {
+  const interactive = overlay.toggleInteractive();
+  refreshTray();
+  return interactive;
+}
+
 function registerHotkeys(): void {
   globalShortcut.unregisterAll();
   const h = store.value.hotkeys;
@@ -227,8 +239,8 @@ function registerHotkeys(): void {
   };
   bind(h.screenshot, () => void startScreenshot());
   bind(h.continuous, () => void toggleContinuous());
-  bind(h.overlay, () => overlay.toggleVisible());
-  bind(h.interactive, () => overlay.toggleInteractive());
+  bind(h.overlay, () => toggleOverlayVisible());
+  bind(h.interactive, () => toggleOverlayInteractive());
   bind(h.assistant, () => void assistant.summon());
 }
 
@@ -350,9 +362,9 @@ function startDevControl(): void {
           if (a.text) await assistant.ask(String(a.text));
           else await assistant.summon();
         } else if (a.action === 'interactive') {
-          out = { interactive: overlay.toggleInteractive() };
+          out = { interactive: toggleOverlayInteractive() };
         } else if (a.action === 'overlay-toggle') {
-          out = { visible: overlay.toggleVisible() };
+          out = { visible: toggleOverlayVisible() };
         } else if (a.action === 'assistant-stop') {
           assistant.close();
         } else if (a.action === 'assistant-pause' || a.action === 'assistant-resume' || a.action === 'assistant-clear') {

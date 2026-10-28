@@ -48,7 +48,7 @@ function fill(): void {
 }
 
 function collect(): Settings {
-  const translators = JSON.parse($<HTMLTextAreaElement>('translators').value);
+  const translators = sourceList();
   const hotkeys: Record<string, string> = {};
   for (const i of document.querySelectorAll<HTMLInputElement>('input[data-hotkey]')) hotkeys[i.dataset.hotkey!] = i.value.trim();
   return {
@@ -84,23 +84,57 @@ function collect(): Settings {
   };
 }
 
+function message(text: string, state: 'info' | 'error' | 'success'): void {
+  $('msg').textContent = text;
+  $('msg').dataset.state = state;
+}
+
+function sourceList(): Array<Record<string, unknown>> {
+  let value: unknown;
+  try { value = JSON.parse($<HTMLTextAreaElement>('translators').value.trim() || '[]'); }
+  catch { throw new Error('Translation sources must be valid JSON. Check the brackets, commas, and quotes.'); }
+  if (!Array.isArray(value)) throw new Error('Translation sources must be a JSON list, inside [ and ].');
+  return value;
+}
+
 for (const b of document.querySelectorAll<HTMLButtonElement>('button[data-add]')) {
   b.addEventListener('click', () => {
-    const list = JSON.parse($<HTMLTextAreaElement>('translators').value || '[]');
-    list.unshift(PRESETS[b.dataset.add!]);
-    $<HTMLTextAreaElement>('translators').value = JSON.stringify(list, null, 2);
+    try {
+      const list = sourceList();
+      const preset = PRESETS[b.dataset.add!];
+      if (list.some(source => source?.name === preset.name)) {
+        message(`${b.textContent!.replace(/^\+\s*/, '')} is already configured. You can edit its entry in Translation sources.`, 'info');
+        return;
+      }
+      list.unshift({ ...preset });
+      $<HTMLTextAreaElement>('translators').value = JSON.stringify(list, null, 2);
+      message('Source added. Select Save to apply your changes.', 'info');
+    } catch (e) {
+      message((e as Error).message, 'error');
+      $('translators').focus();
+    }
   });
 }
 
+document.querySelector('main')!.addEventListener('input', () => message('Unsaved changes. Select Save to apply.', 'info'));
+
 $('save').addEventListener('click', async () => {
+  const button = $<HTMLButtonElement>('save');
+  button.disabled = true;
+  button.textContent = 'Saving…';
+  document.querySelector('main')!.inert = true;
   try {
     s = (await sth.invoke({ kind: 'save-settings', patch: collect() })) as Settings;
     fill();
-    $('msg').textContent = 'Saved.';
+    message('Saved.', 'success');
   } catch (e) {
-    $('msg').textContent = `Not saved: ${(e as Error).message}`;
+    const problem = (e as Error).message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+    message(`Not saved: ${problem}`, 'error');
+  } finally {
+    document.querySelector('main')!.inert = false;
+    button.disabled = false;
+    button.textContent = 'Save';
   }
-  setTimeout(() => ($('msg').textContent = ''), 3000);
 });
 
 void sth.invoke({ kind: 'get-settings' }).then((v) => {
